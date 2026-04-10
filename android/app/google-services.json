@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "634536402530",
+    "project_id": "congrowing",
+    "storage_bucket": "congrowing.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:634536402530:android:3f1f2386598fbb4c3b7b3b",
+        "android_client_info": {
+          "package_name": "com.congrowing.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDWm02v_IGMtmuxb8x7ZfIwWd5blCBL4nw"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

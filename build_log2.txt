@@ -1,0 +1,34 @@
+Running Gradle task 'assembleRelease'...                        
+lib/screens/home_screen.dart:265:23: Error: The getter 'AdManager' isn't defined for the type '_HomeScreenState'.
+ - '_HomeScreenState' is from 'package:congrowing/screens/home_screen.dart' ('lib/screens/home_screen.dart').
+Try correcting the name to the name of an existing getter, or defining a getter or field named 'AdManager'.
+                      AdManager.showInterstitialAd(() => Navigator.pushNamed(context, '/voice-call'));
+                      ^^^^^^^^^
+lib/screens/home_screen.dart:285:23: Error: The getter 'AdManager' isn't defined for the type '_HomeScreenState'.
+ - '_HomeScreenState' is from 'package:congrowing/screens/home_screen.dart' ('lib/screens/home_screen.dart').
+Try correcting the name to the name of an existing getter, or defining a getter or field named 'AdManager'.
+                      AdManager.showInterstitialAd(() => Navigator.pushNamed(context, '/video-call'));
+                      ^^^^^^^^^
+lib/screens/home_screen.dart:538:54: Error: The getter 'isDark' isn't defined for the type '_HomeScreenState'.
+ - '_HomeScreenState' is from 'package:congrowing/screens/home_screen.dart' ('lib/screens/home_screen.dart').
+Try correcting the name to the name of an existing getter, or defining a getter or field named 'isDark'.
+            onTap: () => _showCallTypeSheet(context, isDark),
+                                                     ^^^^^^
+Target kernel_snapshot_program failed: Exception
+
+
+FAILURE: Build failed with an exception.
+
+* What went wrong:
+Execution failed for task ':app:compileFlutterBuildRelease'.
+> Process 'command 'C:\Users\samee\Downloads\flutter_windows_3.41.4-stable\flutter\bin\flutter.bat'' finished with non-zero exit value 1
+
+* Try:
+> Run with --stacktrace option to get the stack trace.
+> Run with --info or --debug option to get more log output.
+> Run with --scan to get full insights.
+> Get more help at https://help.gradle.org.
+
+BUILD FAILED in 45s
+Running Gradle task 'assembleRelease'...                           46.7s
+Gradle task assembleRelease failed with exit code 1

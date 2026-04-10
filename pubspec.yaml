@@ -1,0 +1,45 @@
+name: congrowing
+description: ConGrowing — Growing Together. A social growth app.
+publish_to: "none"
+version: 1.0.0+1
+
+environment:
+  sdk: ">=3.0.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  shared_preferences: ^2.2.2
+  cached_network_image: ^3.3.1
+  google_fonts: ^6.1.0
+  flutter_svg: ^2.0.9
+  firebase_core: ^3.10.1
+  firebase_auth: ^5.4.1
+  cloud_firestore: ^5.6.2
+  firebase_storage: ^12.4.4
+  google_mobile_ads: ^5.2.0
+  google_sign_in: ^6.2.2
+  flutter_webrtc: ^1.4.1
+  image_picker: ^1.1.2
+  file_picker: ^8.1.7
+  intl: ^0.19.0
+  audioplayers: ^6.1.0
+
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.0
+  flutter_launcher_icons: ^0.14.3
+
+flutter_launcher_icons:
+  android: true
+  ios: false
+  image_path: "assets/images/logo.png"
+  adaptive_icon_background: "#FFFFFF"
+  adaptive_icon_foreground: "assets/images/launcher_foreground.png"
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/images/
