@@ -612,7 +612,7 @@ class UserService {
   }
 
   /// Stream total online users count in real-time.
-  /// Counts only users with recent active heartbeats.
+  /// Counts only users with recent active heartbeats within 45 seconds.
   Stream<int> streamOnlineCount() {
     if (!supabaseInitialized) return Stream.value(1);
     final uid = _currentUserId;
@@ -620,11 +620,27 @@ class UserService {
         .from('users')
         .stream(primaryKey: ['id'])
         .map((rows) {
-          final activeOthers = rows.where((r) => r['id'] != uid && _isUserRecentlyActive(r)).length;
-          final totalCount = (uid != null ? 1 : 0) + activeOthers;
-          return totalCount > 0 ? totalCount : 1;
+          final now = DateTime.now().toUtc();
+          final activeOthers = rows.where((r) {
+            final rId = r['id'] as String?;
+            if (rId == uid || rId == null) return false;
+            final isOnline = r['is_online'] as bool? ?? false;
+            if (!isOnline) return false;
+            final lastSeenStr = r['last_seen'] as String?;
+            if (lastSeenStr == null || lastSeenStr.trim().isEmpty) return false;
+            try {
+              final lastSeen = DateTime.parse(lastSeenStr).toUtc();
+              final diff = now.difference(lastSeen).inSeconds.abs();
+              return diff <= 45;
+            } catch (_) {
+              return false;
+            }
+          }).length;
+          final total = (uid != null ? 1 : 0) + activeOthers;
+          return total > 0 ? total : 1;
         });
   }
+
 
 
 
