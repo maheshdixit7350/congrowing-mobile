@@ -101,7 +101,6 @@ class _VoiceCallScreenState extends State<VoiceCallScreen>
         _audioPlayer.stop();
 
         try {
-          Helper.setVolume(1.0, stream);
           Helper.setSpeakerphoneOn(true);
         } catch (e) {
           debugPrint('Audio output setup error: $e');
@@ -109,6 +108,9 @@ class _VoiceCallScreenState extends State<VoiceCallScreen>
 
         for (final track in stream.getAudioTracks()) {
           track.enabled = true;
+          try {
+            Helper.setVolume(1.0, track);
+          } catch (_) {}
         }
 
         if (mounted) {
