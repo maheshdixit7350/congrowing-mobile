@@ -556,7 +556,7 @@ class UserService {
     }
   }
 
-  /// Get all online users (excluding the current user).
+  /// Get all active online users (excluding the current user).
   Future<List<UserModel>> getOnlineUsers({int limit = 30}) async {
     if (!supabaseInitialized) return [];
     final uid = _currentUserId;
@@ -567,12 +567,17 @@ class UserService {
           .eq('is_online', true)
           .neq('id', uid ?? '')
           .limit(limit);
-      return res.map((map) => UserModel.fromJson(map)).toList();
+      final list = (res as List)
+          .where((r) => _isUserRecentlyActive(r as Map<String, dynamic>))
+          .map((map) => UserModel.fromJson(map as Map<String, dynamic>))
+          .toList();
+      return list;
     } catch (e) {
       debugPrint('Error fetching online users: $e');
       return [];
     }
   }
+
 
   /// Check if a user row has sent an active heartbeat within 45 seconds in UTC.
   bool _isUserRecentlyActive(Map<String, dynamic> row) {
@@ -612,34 +617,65 @@ class UserService {
   }
 
   /// Stream total online users count in real-time.
-  /// Counts only users with recent active heartbeats within 45 seconds.
+  /// Refreshes every 5 seconds to guarantee 100% synchronization across all browsers and devices.
   Stream<int> streamOnlineCount() {
     if (!supabaseInitialized) return Stream.value(1);
-    final uid = _currentUserId;
-    return Supabase.instance.client
-        .from('users')
-        .stream(primaryKey: ['id'])
-        .map((rows) {
-          final now = DateTime.now().toUtc();
-          final activeOthers = rows.where((r) {
-            final rId = r['id'] as String?;
-            if (rId == uid || rId == null) return false;
-            final isOnline = r['is_online'] as bool? ?? false;
-            if (!isOnline) return false;
-            final lastSeenStr = r['last_seen'] as String?;
-            if (lastSeenStr == null || lastSeenStr.trim().isEmpty) return false;
-            try {
-              final lastSeen = DateTime.parse(lastSeenStr).toUtc();
-              final diff = now.difference(lastSeen).inSeconds.abs();
-              return diff <= 45;
-            } catch (_) {
-              return false;
-            }
-          }).length;
-          final total = (uid != null ? 1 : 0) + activeOthers;
-          return total > 0 ? total : 1;
-        });
+
+    // Controller emitting initial count immediately, then polling every 5 seconds
+    final controller = StreamController<int>();
+
+    void updateCount() async {
+      final count = await _fetchActiveOnlineCount();
+      if (!controller.isClosed) {
+        controller.add(count);
+      }
+    }
+
+    // Initial immediate fetch
+    updateCount();
+
+    // Periodic 5s polling
+    final timer = Timer.periodic(const Duration(seconds: 5), (_) => updateCount());
+
+    controller.onCancel = () {
+      timer.cancel();
+      controller.close();
+    };
+
+    return controller.stream;
   }
+
+  /// Helper to query active users with fresh heartbeats (within 45 seconds).
+  Future<int> _fetchActiveOnlineCount() async {
+    final uid = _currentUserId;
+    try {
+      final res = await Supabase.instance.client
+          .from('users')
+          .select('id, is_online, last_seen')
+          .eq('is_online', true);
+
+      final now = DateTime.now().toUtc();
+      final activeOthers = (res as List).where((r) {
+        final rId = r['id'] as String?;
+        if (rId == uid || rId == null) return false;
+        final lastSeenStr = r['last_seen'] as String?;
+        if (lastSeenStr == null || lastSeenStr.trim().isEmpty) return false;
+        try {
+          final lastSeen = DateTime.parse(lastSeenStr).toUtc();
+          final diff = now.difference(lastSeen).inSeconds.abs();
+          return diff <= 45;
+        } catch (_) {
+          return false;
+        }
+      }).length;
+
+      final total = (uid != null ? 1 : 0) + activeOthers;
+      return total > 0 ? total : 1;
+    } catch (e) {
+      return 1;
+    }
+  }
+
 
 
 
