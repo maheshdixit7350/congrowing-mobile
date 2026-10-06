@@ -40,6 +40,13 @@ class _VideoCallScreenState extends State<VideoCallScreen>
   bool _initialized = false;
   String? _errorMsg;
 
+  // Audio stats & level monitoring
+  double _localAudioLevel = 0.0;
+  double _remoteAudioLevel = 0.0;
+  int _bytesSent = 0;
+  int _bytesReceived = 0;
+  Timer? _statsTimer;
+
   // Duration timer
   final Stopwatch _callDuration = Stopwatch();
   Timer? _durationTimer;
@@ -48,6 +55,47 @@ class _VideoCallScreenState extends State<VideoCallScreen>
   // Subscriptions
   StreamSubscription? _incomingCallSub;
   StreamSubscription? _roomStatusSub;
+
+  void _startStatsTimer() {
+    _statsTimer?.cancel();
+    _statsTimer = Timer.periodic(const Duration(milliseconds: 200), (_) async {
+      final pc = signaling.peerConnection;
+      if (pc == null || !mounted) return;
+      try {
+        final stats = await pc.getStats();
+        double localLvl = 0.0;
+        double remoteLvl = 0.0;
+        int sent = 0;
+        int recv = 0;
+
+        for (final report in stats) {
+          if (report.type == 'outbound-rtp') {
+            sent += int.tryParse(report.values['bytesSent']?.toString() ?? '0') ?? 0;
+          }
+          if (report.type == 'inbound-rtp') {
+            recv += int.tryParse(report.values['bytesReceived']?.toString() ?? '0') ?? 0;
+          }
+          if (report.values.containsKey('audioLevel')) {
+            final lvl = double.tryParse(report.values['audioLevel']?.toString() ?? '0') ?? 0.0;
+            if (report.type == 'media-source' || report.type == 'outbound-rtp') {
+              if (lvl > localLvl) localLvl = lvl;
+            } else {
+              if (lvl > remoteLvl) remoteLvl = lvl;
+            }
+          }
+        }
+
+        if (mounted) {
+          setState(() {
+            _localAudioLevel = localLvl;
+            _remoteAudioLevel = remoteLvl;
+            _bytesSent = sent;
+            _bytesReceived = recv;
+          });
+        }
+      } catch (_) {}
+    });
+  }
 
   @override
   void initState() {
@@ -115,6 +163,7 @@ class _VideoCallScreenState extends State<VideoCallScreen>
           _radarController.stop();
           _callDuration.start();
           _startDurationTimer();
+          _startStatsTimer();
         }
       };
 
@@ -194,6 +243,7 @@ class _VideoCallScreenState extends State<VideoCallScreen>
   void dispose() {
     _radarController.dispose();
     _audioPlayer.dispose();
+    _statsTimer?.cancel();
     _incomingCallSub?.cancel();
     _roomStatusSub?.cancel();
     if (_callDuration.isRunning) {
@@ -271,39 +321,133 @@ class _VideoCallScreenState extends State<VideoCallScreen>
             // 1. Remote Video (Full Screen)
             Container(
               color: const Color(0xFF0F172A),
-            child: _errorMsg == null
-                ? RTCVideoView(
-                    _remoteRenderer,
-                    objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
-                  )
-                : const SizedBox.expand(),
-          ),
-
-          // 2. Connecting / Calling UI
-          if (_connecting && _errorMsg == null) _buildCallingOverlay(),
-
-          // 3. Error State
-          if (_errorMsg != null) _buildErrorOverlay(),
-
-          // 4. In-call branding + controls
-          if (!_connecting && _errorMsg == null) ...[
-            _buildTopBranding(),
-            _buildBottomControls(),
-          ],
-
-          // 5. Local Video PIP
-          if (_errorMsg == null)
-            AnimatedPositioned(
-              duration: const Duration(milliseconds: 300),
-              bottom: _connecting ? 40 : 120,
-              right: 20,
-              child: _buildLocalPIP(),
+              child: _errorMsg == null
+                  ? RTCVideoView(
+                      _remoteRenderer,
+                      objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
+                    )
+                  : const SizedBox.expand(),
             ),
+
+            // 2. Connecting / Calling UI
+            if (_connecting && _errorMsg == null) _buildCallingOverlay(),
+
+            // 3. Error State
+            if (_errorMsg != null) _buildErrorOverlay(),
+
+            // 4. In-call branding + controls + diagnostics
+            if (!_connecting && _errorMsg == null) ...[
+              _buildTopBranding(),
+              Positioned(
+                top: 135,
+                left: 20,
+                right: 20,
+                child: _buildAudioDiagnosticWidget(),
+              ),
+              _buildBottomControls(),
+            ],
+
+            // 5. Local Video PIP
+            if (_errorMsg == null)
+              AnimatedPositioned(
+                duration: const Duration(milliseconds: 300),
+                bottom: _connecting ? 40 : 120,
+                right: 20,
+                child: _buildLocalPIP(),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildAudioDiagnosticWidget() {
+    final sentKb = (_bytesSent / 1024).toStringAsFixed(1);
+    final recvKb = (_bytesReceived / 1024).toStringAsFixed(1);
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+      decoration: BoxDecoration(
+        color: Colors.black45,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.white12),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              // Local Mic Level
+              Row(
+                children: [
+                  Icon(
+                    _audioMuted ? Icons.mic_off_rounded : Icons.mic_rounded,
+                    color: _audioMuted ? Colors.redAccent : Colors.greenAccent,
+                    size: 14,
+                  ),
+                  const SizedBox(width: 4),
+                  Text(
+                    'Mic: ',
+                    style: GoogleFonts.inter(color: Colors.white70, fontSize: 11),
+                  ),
+                  _buildVolumeBar(_localAudioLevel, Colors.greenAccent),
+                ],
+              ),
+              // Remote Speaker Level
+              Row(
+                children: [
+                  const Icon(Icons.volume_up_rounded, color: Colors.cyanAccent, size: 14),
+                  const SizedBox(width: 4),
+                  Text(
+                    'Speaker: ',
+                    style: GoogleFonts.inter(color: Colors.white70, fontSize: 11),
+                  ),
+                  _buildVolumeBar(_remoteAudioLevel, Colors.cyanAccent),
+                ],
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                '⬆️ Sent: $sentKb KB',
+                style: GoogleFonts.inter(color: Colors.white38, fontSize: 10),
+              ),
+              Text(
+                '🔊 Tap screen to enable audio',
+                style: GoogleFonts.inter(color: Colors.white54, fontSize: 9, fontWeight: FontWeight.w500),
+              ),
+              Text(
+                '⬇️ Recv: $recvKb KB',
+                style: GoogleFonts.inter(color: Colors.white38, fontSize: 10),
+              ),
+            ],
+          ),
         ],
       ),
-    ),
-  );
-}
+    );
+  }
+
+  Widget _buildVolumeBar(double level, Color activeColor) {
+    return Row(
+      children: List.generate(5, (index) {
+        final threshold = (index + 1) * 0.15;
+        final isActive = level >= threshold || (level > 0.02 && index == 0);
+        return Container(
+          width: 4,
+          height: 8 + (index * 2.5),
+          margin: const EdgeInsets.symmetric(horizontal: 1.5),
+          decoration: BoxDecoration(
+            color: isActive ? activeColor : Colors.white24,
+            borderRadius: BorderRadius.circular(2),
+          ),
+        );
+      }),
+    );
+  }
 
   Widget _buildTopBranding() {
     return Positioned(
