@@ -99,6 +99,18 @@ class _VoiceCallScreenState extends State<VoiceCallScreen>
       signaling.onAddRemoteStream = (stream) {
         _remoteRenderer.srcObject = stream;
         _audioPlayer.stop();
+
+        try {
+          Helper.setVolume(1.0, stream);
+          Helper.setSpeakerphoneOn(true);
+        } catch (e) {
+          debugPrint('Audio output setup error: $e');
+        }
+
+        for (final track in stream.getAudioTracks()) {
+          track.enabled = true;
+        }
+
         if (mounted) {
           setState(() => _connecting = false);
           _radarController.stop();

@@ -55,7 +55,8 @@ class Signaling {
         'username': 'e05c4a4a1347fef5fedaa1c5',
         'credential': 'fCBVVCuN/6gVZrFj',
       },
-    ]
+    ],
+    'sdpSemantics': 'unified-plan',
   };
 
   // ── Media ──────────────────────────────────────────────────────────────────
@@ -213,10 +214,10 @@ class Signaling {
       }
     };
 
-    final offerConstraints = {
+    final offerConstraints = <String, dynamic>{
       'mandatory': {
-        'OfferToReceiveAudio': true,
-        'OfferToReceiveVideo': isVideo,
+        'OfferToReceiveAudio': 'true',
+        'OfferToReceiveVideo': isVideo ? 'true' : 'false',
       },
       'optional': [],
     };
@@ -332,10 +333,10 @@ class Signaling {
     _remoteDescriptionSet = true;
     await _flushPendingCandidates();
 
-    final answerConstraints = {
+    final answerConstraints = <String, dynamic>{
       'mandatory': {
-        'OfferToReceiveAudio': true,
-        'OfferToReceiveVideo': true,
+        'OfferToReceiveAudio': 'true',
+        'OfferToReceiveVideo': 'true',
       },
       'optional': [],
     };
