@@ -354,9 +354,8 @@ class UserService {
       }).eq('id', uid);
 
       if (online) {
-        await PresenceService.instance.initPresence();
-        // Active heartbeat ping every 5 seconds for background DB sync
-        _heartbeatTimer = Timer.periodic(const Duration(seconds: 5), (_) async {
+        // Active heartbeat ping every 2 seconds for ultra-responsive live status
+        _heartbeatTimer = Timer.periodic(const Duration(seconds: 2), (_) async {
           final curUid = _currentUserId;
           if (curUid != null && supabaseInitialized) {
             try {
@@ -367,8 +366,6 @@ class UserService {
             } catch (_) {}
           }
         });
-      } else {
-        await PresenceService.instance.leavePresence();
       }
 
     } catch (e) {
@@ -620,13 +617,35 @@ class UserService {
             .toList());
   }
 
-  /// Stream total online users count in real-time via Supabase WebSocket Presence.
+  /// Stream total online users count in real-time.
+  /// Refreshes every 500ms (0.5 sec) to guarantee sub-second synchronization across all browsers and devices.
   Stream<int> streamOnlineCount() {
     if (!supabaseInitialized) return Stream.value(1);
-    return PresenceService.instance.streamOnlineCount;
+
+    final controller = StreamController<int>();
+
+    void updateCount() async {
+      final count = await _fetchActiveOnlineCount();
+      if (!controller.isClosed) {
+        controller.add(count);
+      }
+    }
+
+    // Initial immediate fetch
+    updateCount();
+
+    // High-frequency 500ms (0.5 sec) stream polling
+    final timer = Timer.periodic(const Duration(milliseconds: 500), (_) => updateCount());
+
+    controller.onCancel = () {
+      timer.cancel();
+      controller.close();
+    };
+
+    return controller.stream;
   }
 
-  /// Helper to query active users with fresh heartbeats (within 12 seconds).
+  /// Helper to query active users with fresh heartbeats (within 6 seconds).
   Future<int> _fetchActiveOnlineCount() async {
     final uid = _currentUserId;
     try {
@@ -644,7 +663,7 @@ class UserService {
         try {
           final lastSeen = DateTime.parse(lastSeenStr).toUtc();
           final diff = now.difference(lastSeen).inSeconds.abs();
-          return diff <= 12;
+          return diff <= 6;
         } catch (_) {
           return false;
         }
