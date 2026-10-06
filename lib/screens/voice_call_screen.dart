@@ -210,18 +210,31 @@ class _VoiceCallScreenState extends State<VoiceCallScreen>
     super.dispose();
   }
 
+  void _unmuteAudio() {
+    try {
+      signaling.localStream?.getAudioTracks().forEach((track) {
+        track.enabled = !_audioMuted;
+      });
+      signaling.remoteStream?.getAudioTracks().forEach((track) {
+        track.enabled = true;
+        try {
+          Helper.setVolume(1.0, track);
+        } catch (_) {}
+      });
+      try {
+        Helper.setSpeakerphoneOn(_speakerOn);
+      } catch (_) {}
+    } catch (_) {}
+  }
+
   void _toggleMic() {
     setState(() => _audioMuted = !_audioMuted);
-    signaling.localStream?.getAudioTracks().forEach((track) {
-      track.enabled = !_audioMuted;
-    });
+    _unmuteAudio();
   }
 
   void _toggleSpeaker() {
     setState(() => _speakerOn = !_speakerOn);
-    try {
-      Helper.setSpeakerphoneOn(_speakerOn);
-    } catch (_) {}
+    _unmuteAudio();
   }
 
   void _endCall() {
@@ -250,18 +263,21 @@ class _VoiceCallScreenState extends State<VoiceCallScreen>
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color(0xFF0F172A),
-      body: Stack(
-        children: [
-          // Background Gradient
-          Container(
-            decoration: const BoxDecoration(
-              gradient: RadialGradient(
-                center: Alignment(0, -0.2),
-                radius: 1.2,
-                colors: [Color(0xFF1E293B), Color(0xFF0F172A)],
+      body: GestureDetector(
+        onTap: _unmuteAudio,
+        behavior: HitTestBehavior.translucent,
+        child: Stack(
+          children: [
+            // Background Gradient
+            Container(
+              decoration: const BoxDecoration(
+                gradient: RadialGradient(
+                  center: Alignment(0, -0.2),
+                  radius: 1.2,
+                  colors: [Color(0xFF1E293B), Color(0xFF0F172A)],
+                ),
               ),
             ),
-          ),
 
           // Main Content
           SafeArea(

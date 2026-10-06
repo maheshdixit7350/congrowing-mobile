@@ -208,11 +208,26 @@ class _VideoCallScreenState extends State<VideoCallScreen>
     super.dispose();
   }
 
+  void _unmuteAudio() {
+    try {
+      signaling.localStream?.getAudioTracks().forEach((track) {
+        track.enabled = !_audioMuted;
+      });
+      signaling.remoteStream?.getAudioTracks().forEach((track) {
+        track.enabled = true;
+        try {
+          Helper.setVolume(1.0, track);
+        } catch (_) {}
+      });
+      try {
+        Helper.setSpeakerphoneOn(true);
+      } catch (_) {}
+    } catch (_) {}
+  }
+
   void _toggleMic() {
     setState(() => _audioMuted = !_audioMuted);
-    signaling.localStream?.getAudioTracks().forEach((track) {
-      track.enabled = !_audioMuted;
-    });
+    _unmuteAudio();
   }
 
   void _toggleVideo() {
@@ -248,11 +263,14 @@ class _VideoCallScreenState extends State<VideoCallScreen>
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.black,
-      body: Stack(
-        children: [
-          // 1. Remote Video (Full Screen)
-          Container(
-            color: const Color(0xFF0F172A),
+      body: GestureDetector(
+        onTap: _unmuteAudio,
+        behavior: HitTestBehavior.translucent,
+        child: Stack(
+          children: [
+            // 1. Remote Video (Full Screen)
+            Container(
+              color: const Color(0xFF0F172A),
             child: _errorMsg == null
                 ? RTCVideoView(
                     _remoteRenderer,
