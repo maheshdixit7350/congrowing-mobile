@@ -215,9 +215,7 @@ class Signaling {
         await Supabase.instance.client.from('caller_candidates').insert({
           'room_id': roomId,
           'candidate': candidate.candidate,
-          'sdpMid': candidate.sdpMid,
           'sdpmid': candidate.sdpMid,
-          'sdpMLineIndex': candidate.sdpMLineIndex,
           'sdpmlineindex': candidate.sdpMLineIndex,
         });
       } catch (e) {
@@ -349,9 +347,7 @@ class Signaling {
         await Supabase.instance.client.from('callee_candidates').insert({
           'room_id': joinRoomId,
           'candidate': candidate.candidate,
-          'sdpMid': candidate.sdpMid,
           'sdpmid': candidate.sdpMid,
-          'sdpMLineIndex': candidate.sdpMLineIndex,
           'sdpmlineindex': candidate.sdpMLineIndex,
         });
       } catch (e) {
