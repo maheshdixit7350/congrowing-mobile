@@ -492,11 +492,11 @@ class Signaling {
       debugPrint('ICE connection state: $state');
     };
     peerConnection?.onTrack = (RTCTrackEvent event) async {
+      event.track.enabled = true;
       if (event.streams.isNotEmpty) {
         remoteStream = event.streams[0];
       } else {
-        remoteStream ??= await createLocalMediaStream('remote_stream');
-        remoteStream?.addTrack(event.track);
+        remoteStream ??= MediaStream([event.track]);
       }
       for (final track in remoteStream?.getAudioTracks() ?? []) {
         track.enabled = true;
