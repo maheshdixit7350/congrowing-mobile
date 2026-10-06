@@ -168,10 +168,10 @@ class _ConGrowingAppState extends State<ConGrowingApp>
     if (currentUid == null) return;
 
     if (state == AppLifecycleState.resumed) {
-      UserService.instance.setOnlineStatus(true);
+      unawaited(UserService.instance.setOnlineStatus(true));
     } else if (state == AppLifecycleState.paused ||
         state == AppLifecycleState.detached) {
-      UserService.instance.setOnlineStatus(false);
+      unawaited(UserService.instance.setOnlineStatus(false));
     }
   }
 

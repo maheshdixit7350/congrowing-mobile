@@ -6,6 +6,7 @@ import '../models/user_model.dart';
 import '../main.dart' show supabaseInitialized;
 import 'supabase_auth_service.dart';
 import 'notification_service.dart';
+import 'presence_service.dart';
 
 /// Singleton service that manages the current user's data from Supabase.
 class UserService {
@@ -353,8 +354,9 @@ class UserService {
       }).eq('id', uid);
 
       if (online) {
-        // Active heartbeat ping every 3 seconds to maintain sub-second runtime status
-        _heartbeatTimer = Timer.periodic(const Duration(seconds: 3), (_) async {
+        await PresenceService.instance.initPresence();
+        // Active heartbeat ping every 5 seconds for background DB sync
+        _heartbeatTimer = Timer.periodic(const Duration(seconds: 5), (_) async {
           final curUid = _currentUserId;
           if (curUid != null && supabaseInitialized) {
             try {
@@ -365,6 +367,8 @@ class UserService {
             } catch (_) {}
           }
         });
+      } else {
+        await PresenceService.instance.leavePresence();
       }
 
     } catch (e) {
@@ -616,33 +620,10 @@ class UserService {
             .toList());
   }
 
-  /// Stream total online users count in real-time.
-  /// Refreshes every 1 second to guarantee 100% synchronization across all browsers and devices.
+  /// Stream total online users count in real-time via Supabase WebSocket Presence.
   Stream<int> streamOnlineCount() {
     if (!supabaseInitialized) return Stream.value(1);
-
-    // Controller emitting initial count immediately, then polling every 1 second
-    final controller = StreamController<int>();
-
-    void updateCount() async {
-      final count = await _fetchActiveOnlineCount();
-      if (!controller.isClosed) {
-        controller.add(count);
-      }
-    }
-
-    // Initial immediate fetch
-    updateCount();
-
-    // Periodic 1s polling
-    final timer = Timer.periodic(const Duration(seconds: 1), (_) => updateCount());
-
-    controller.onCancel = () {
-      timer.cancel();
-      controller.close();
-    };
-
-    return controller.stream;
+    return PresenceService.instance.streamOnlineCount;
   }
 
   /// Helper to query active users with fresh heartbeats (within 12 seconds).
