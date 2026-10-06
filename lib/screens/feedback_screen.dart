@@ -44,7 +44,8 @@ class _FeedbackScreenState extends State<FeedbackScreen>
   void didChangeDependencies() {
     super.didChangeDependencies();
     if (!_initialized) {
-      final args = ModalRoute.of(context)?.settings.arguments as Map<String, dynamic>?;
+      final args =
+          ModalRoute.of(context)?.settings.arguments as Map<String, dynamic>?;
       if (args != null) {
         _otherName = args['name'] as String? ?? 'User';
         _otherUid = args['otherUid'] as String? ?? '';
@@ -85,7 +86,8 @@ class _FeedbackScreenState extends State<FeedbackScreen>
 
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text('Review submitted! CRI updated.', style: GoogleFonts.inter(fontWeight: FontWeight.w600)),
+        content: Text('Review submitted! CRI updated.',
+            style: GoogleFonts.inter(fontWeight: FontWeight.w600)),
         backgroundColor: AppColors.primary,
         behavior: SnackBarBehavior.floating,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -93,7 +95,9 @@ class _FeedbackScreenState extends State<FeedbackScreen>
 
       // Show interstitial ad, then go home
       AdManager.showInterstitialAd(() {
-        if (mounted) Navigator.pushNamedAndRemoveUntil(context, '/home', (r) => false);
+        if (mounted) {
+          Navigator.pushNamedAndRemoveUntil(context, '/home', (r) => false);
+        }
       });
     }
   }
@@ -112,10 +116,15 @@ class _FeedbackScreenState extends State<FeedbackScreen>
         backgroundColor: const Color(0xFFF5F3FF),
         elevation: 0,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back_ios_new_rounded, size: 18, color: Colors.black87),
+          icon: const Icon(Icons.arrow_back_ios_new_rounded,
+              size: 18, color: Colors.black87),
           onPressed: () => Navigator.pop(context),
         ),
-        title: Text('Feedback', style: GoogleFonts.outfit(fontWeight: FontWeight.w700, fontSize: 18, color: Colors.black87)),
+        title: Text('Feedback',
+            style: GoogleFonts.outfit(
+                fontWeight: FontWeight.w700,
+                fontSize: 18,
+                color: Colors.black87)),
         centerTitle: true,
         actions: [
           IconButton(
@@ -133,12 +142,16 @@ class _FeedbackScreenState extends State<FeedbackScreen>
               // Title
               Text(
                 'Rate your Interaction',
-                style: GoogleFonts.outfit(fontSize: 24, fontWeight: FontWeight.w800, color: Colors.black87),
+                style: GoogleFonts.outfit(
+                    fontSize: 24,
+                    fontWeight: FontWeight.w800,
+                    color: Colors.black87),
               ),
               const SizedBox(height: 4),
               Text(
                 'How was your conversation with $_otherName?',
-                style: GoogleFonts.inter(fontSize: 13, color: Colors.grey.shade600),
+                style: GoogleFonts.inter(
+                    fontSize: 13, color: Colors.grey.shade600),
               ),
               const SizedBox(height: 24),
 
@@ -149,13 +162,20 @@ class _FeedbackScreenState extends State<FeedbackScreen>
                   CircleAvatar(
                     radius: 48,
                     backgroundColor: const Color(0xFF8B5CF6).withAlpha(30),
-                    backgroundImage: _otherAvatarUrl != null ? NetworkImage(_otherAvatarUrl!) : null,
+                    backgroundImage: _otherAvatarUrl != null
+                        ? NetworkImage(_otherAvatarUrl!)
+                        : null,
                     child: _otherAvatarUrl == null
-                        ? Text(initial, style: GoogleFonts.inter(fontSize: 36, fontWeight: FontWeight.w800, color: const Color(0xFF8B5CF6)))
+                        ? Text(initial,
+                            style: GoogleFonts.inter(
+                                fontSize: 36,
+                                fontWeight: FontWeight.w800,
+                                color: const Color(0xFF8B5CF6)))
                         : null,
                   ),
                   Container(
-                    width: 18, height: 18,
+                    width: 18,
+                    height: 18,
                     decoration: BoxDecoration(
                       color: Colors.green,
                       shape: BoxShape.circle,
@@ -165,17 +185,25 @@ class _FeedbackScreenState extends State<FeedbackScreen>
                 ],
               ),
               const SizedBox(height: 12),
-              Text(_otherName, style: GoogleFonts.outfit(fontSize: 20, fontWeight: FontWeight.w700, color: Colors.black87)),
+              Text(_otherName,
+                  style: GoogleFonts.outfit(
+                      fontSize: 20,
+                      fontWeight: FontWeight.w700,
+                      color: Colors.black87)),
               const SizedBox(height: 4),
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 5),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 14, vertical: 5),
                 decoration: BoxDecoration(
                   color: const Color(0xFF8B5CF6).withAlpha(20),
                   borderRadius: BorderRadius.circular(20),
                 ),
                 child: Text(
                   'Call Duration: ${_formatDuration(_callDurationSeconds)}',
-                  style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w600, color: const Color(0xFF8B5CF6)),
+                  style: GoogleFonts.inter(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: const Color(0xFF8B5CF6)),
                 ),
               ),
 
@@ -187,7 +215,12 @@ class _FeedbackScreenState extends State<FeedbackScreen>
                 decoration: BoxDecoration(
                   color: Colors.white,
                   borderRadius: BorderRadius.circular(20),
-                  boxShadow: [BoxShadow(color: Colors.black.withAlpha(8), blurRadius: 20, offset: const Offset(0, 4))],
+                  boxShadow: [
+                    BoxShadow(
+                        color: Colors.black.withAlpha(8),
+                        blurRadius: 20,
+                        offset: const Offset(0, 4))
+                  ],
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -195,16 +228,24 @@ class _FeedbackScreenState extends State<FeedbackScreen>
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        Text('Empathy Level', style: GoogleFonts.inter(fontSize: 16, fontWeight: FontWeight.w700, color: Colors.black87)),
+                        Text('Empathy Level',
+                            style: GoogleFonts.inter(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w700,
+                                color: Colors.black87)),
                         Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 14, vertical: 6),
                           decoration: BoxDecoration(
                             color: const Color(0xFF8B5CF6).withAlpha(20),
                             borderRadius: BorderRadius.circular(12),
                           ),
                           child: Text(
                             _empathyScore.toStringAsFixed(1),
-                            style: GoogleFonts.inter(fontSize: 22, fontWeight: FontWeight.w800, color: const Color(0xFF8B5CF6)),
+                            style: GoogleFonts.inter(
+                                fontSize: 22,
+                                fontWeight: FontWeight.w800,
+                                color: const Color(0xFF8B5CF6)),
                           ),
                         ),
                       ],
@@ -215,7 +256,8 @@ class _FeedbackScreenState extends State<FeedbackScreen>
                         activeTrackColor: const Color(0xFF8B5CF6),
                         inactiveTrackColor: const Color(0xFFE0D7F8),
                         thumbColor: Colors.white,
-                        thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 14, elevation: 4),
+                        thumbShape: const RoundSliderThumbShape(
+                            enabledThumbRadius: 14, elevation: 4),
                         overlayColor: const Color(0xFF8B5CF6).withAlpha(30),
                         trackHeight: 8,
                       ),
@@ -230,8 +272,12 @@ class _FeedbackScreenState extends State<FeedbackScreen>
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        Text('Not Empathetic', style: GoogleFonts.inter(fontSize: 11, color: Colors.grey.shade500)),
-                        Text('Very Empathetic', style: GoogleFonts.inter(fontSize: 11, color: Colors.grey.shade500)),
+                        Text('Not Empathetic',
+                            style: GoogleFonts.inter(
+                                fontSize: 11, color: Colors.grey.shade500)),
+                        Text('Very Empathetic',
+                            style: GoogleFonts.inter(
+                                fontSize: 11, color: Colors.grey.shade500)),
                       ],
                     ),
                   ],
@@ -270,15 +316,22 @@ class _FeedbackScreenState extends State<FeedbackScreen>
                 decoration: BoxDecoration(
                   color: Colors.white,
                   borderRadius: BorderRadius.circular(20),
-                  boxShadow: [BoxShadow(color: Colors.black.withAlpha(8), blurRadius: 20, offset: const Offset(0, 4))],
+                  boxShadow: [
+                    BoxShadow(
+                        color: Colors.black.withAlpha(8),
+                        blurRadius: 20,
+                        offset: const Offset(0, 4))
+                  ],
                 ),
                 child: TextField(
                   controller: _noteCtrl,
                   maxLines: 3,
                   style: GoogleFonts.inter(fontSize: 14),
                   decoration: InputDecoration(
-                    hintText: 'Add a personal note about this interaction...\n(Optional)',
-                    hintStyle: GoogleFonts.inter(fontSize: 13, color: Colors.grey.shade400),
+                    hintText:
+                        'Add a personal note about this interaction...\n(Optional)',
+                    hintStyle: GoogleFonts.inter(
+                        fontSize: 13, color: Colors.grey.shade400),
                     border: InputBorder.none,
                     isDense: true,
                   ),
@@ -299,20 +352,31 @@ class _FeedbackScreenState extends State<FeedbackScreen>
                     ),
                     borderRadius: BorderRadius.circular(28),
                     boxShadow: [
-                      BoxShadow(color: const Color(0xFF8B5CF6).withAlpha(100), blurRadius: 20, offset: const Offset(0, 8)),
+                      BoxShadow(
+                          color: const Color(0xFF8B5CF6).withAlpha(100),
+                          blurRadius: 20,
+                          offset: const Offset(0, 8)),
                     ],
                   ),
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
                       if (_submitting)
-                        const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2.5))
+                        const SizedBox(
+                            width: 22,
+                            height: 22,
+                            child: CircularProgressIndicator(
+                                color: Colors.white, strokeWidth: 2.5))
                       else ...[
-                        const Icon(Icons.check_circle_outline_rounded, color: Colors.white, size: 22),
+                        const Icon(Icons.check_circle_outline_rounded,
+                            color: Colors.white, size: 22),
                         const SizedBox(width: 10),
                         Text(
                           'Submit Review & Update Score',
-                          style: GoogleFonts.inter(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 15),
+                          style: GoogleFonts.inter(
+                              color: Colors.white,
+                              fontWeight: FontWeight.w700,
+                              fontSize: 15),
                         ),
                       ],
                     ],
@@ -324,8 +388,13 @@ class _FeedbackScreenState extends State<FeedbackScreen>
 
               // Skip option
               GestureDetector(
-                onTap: () => Navigator.pushNamedAndRemoveUntil(context, '/home', (r) => false),
-                child: Text('Skip for now', style: GoogleFonts.inter(color: Colors.grey.shade500, fontSize: 13, fontWeight: FontWeight.w500)),
+                onTap: () => Navigator.pushNamedAndRemoveUntil(
+                    context, '/home', (r) => false),
+                child: Text('Skip for now',
+                    style: GoogleFonts.inter(
+                        color: Colors.grey.shade500,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w500)),
               ),
 
               const SizedBox(height: 32),
@@ -362,12 +431,18 @@ class _ToggleCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(20),
-        boxShadow: [BoxShadow(color: Colors.black.withAlpha(8), blurRadius: 20, offset: const Offset(0, 4))],
+        boxShadow: [
+          BoxShadow(
+              color: Colors.black.withAlpha(8),
+              blurRadius: 20,
+              offset: const Offset(0, 4))
+        ],
       ),
       child: Row(
         children: [
           Container(
-            width: 44, height: 44,
+            width: 44,
+            height: 44,
             decoration: BoxDecoration(
               color: iconBg.withAlpha(25),
               shape: BoxShape.circle,
@@ -379,15 +454,21 @@ class _ToggleCard extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(title, style: GoogleFonts.inter(fontSize: 14, fontWeight: FontWeight.w600, color: Colors.black87)),
-                Text(subtitle, style: GoogleFonts.inter(fontSize: 11, color: Colors.grey.shade500)),
+                Text(title,
+                    style: GoogleFonts.inter(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.black87)),
+                Text(subtitle,
+                    style: GoogleFonts.inter(
+                        fontSize: 11, color: Colors.grey.shade500)),
               ],
             ),
           ),
           Switch(
             value: value,
             onChanged: onChanged,
-            activeColor: const Color(0xFF8B5CF6),
+            activeThumbColor: const Color(0xFF8B5CF6),
             activeTrackColor: const Color(0xFF8B5CF6).withAlpha(80),
           ),
         ],

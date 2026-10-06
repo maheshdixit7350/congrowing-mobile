@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
@@ -7,7 +8,7 @@ import '../services/matchmaking_service.dart';
 import 'package:audioplayers/audioplayers.dart';
 import '../utils/ad_manager.dart';
 import '../utils/app_colors.dart';
-import '../main.dart' show firebaseInitialized;
+import '../main.dart' show supabaseInitialized;
 
 class VideoCallScreen extends StatefulWidget {
   const VideoCallScreen({super.key});
@@ -16,19 +17,37 @@ class VideoCallScreen extends StatefulWidget {
   State<VideoCallScreen> createState() => _VideoCallScreenState();
 }
 
-class _VideoCallScreenState extends State<VideoCallScreen> with SingleTickerProviderStateMixin {
+class _VideoCallScreenState extends State<VideoCallScreen>
+    with SingleTickerProviderStateMixin {
   final Signaling signaling = Signaling();
   final MatchmakingService matchmaking = MatchmakingService();
   final RTCVideoRenderer _localRenderer = RTCVideoRenderer();
   final RTCVideoRenderer _remoteRenderer = RTCVideoRenderer();
   final AudioPlayer _audioPlayer = AudioPlayer();
-  
+
   late AnimationController _radarController;
-  
+
+  // Route args
+  String _otherUid = '';
+  String _contactName = 'Stranger';
+  String? _contactAvatarUrl;
+  bool _isCaller = false;
+  String _roomId = '';
+
   bool _connecting = true;
   bool _audioMuted = false;
   bool _videoMuted = false;
+  bool _initialized = false;
   String? _errorMsg;
+
+  // Duration timer
+  final Stopwatch _callDuration = Stopwatch();
+  Timer? _durationTimer;
+  String _durationText = '00:00';
+
+  // Subscriptions
+  StreamSubscription? _incomingCallSub;
+  StreamSubscription? _roomStatusSub;
 
   @override
   void initState() {
@@ -37,14 +56,33 @@ class _VideoCallScreenState extends State<VideoCallScreen> with SingleTickerProv
       vsync: this,
       duration: const Duration(seconds: 2),
     )..repeat();
-    _initVideoCall();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (!_initialized) {
+      final args =
+          ModalRoute.of(context)?.settings.arguments as Map<String, dynamic>?;
+      if (args != null) {
+        _otherUid = args['otherUid'] as String? ?? '';
+        _contactName = args['name'] as String? ?? 'Stranger';
+        _contactAvatarUrl = args['avatarUrl'] as String?;
+        _roomId = args['roomId'] as String? ?? '';
+        _isCaller = args['isCaller'] as bool? ?? _roomId.isEmpty;
+      } else {
+        _isCaller = true;
+      }
+      _initialized = true;
+      _initVideoCall();
+    }
   }
 
   Future<void> _initVideoCall() async {
-    if (!firebaseInitialized) {
+    if (!supabaseInitialized) {
       setState(() {
         _connecting = false;
-        _errorMsg = 'Firebase is not configured.\nPlease check your connection.';
+        _errorMsg = 'Backend is not configured.\nPlease check your connection.';
       });
       return;
     }
@@ -52,30 +90,68 @@ class _VideoCallScreenState extends State<VideoCallScreen> with SingleTickerProv
     try {
       await _localRenderer.initialize();
       await _remoteRenderer.initialize();
-      
-      signaling.onAddRemoteStream = ((stream) {
+
+      signaling.onAddRemoteStream = (stream) {
         _remoteRenderer.srcObject = stream;
-        _audioPlayer.stop(); // Stop ringing when connected
+        _audioPlayer.stop();
         if (mounted) {
+          setState(() => _connecting = false);
+          _radarController.stop();
+          _callDuration.start();
+          _startDurationTimer();
+        }
+      };
+
+      await signaling.openUserMedia(_localRenderer, _remoteRenderer,
+          isVideo: true);
+
+      // Start calling ringback tone (for caller only)
+      if (_isCaller) {
+        await _audioPlayer.setReleaseMode(ReleaseMode.loop);
+        try {
+          await _audioPlayer.play(AssetSource('audio/calling.wav'));
+        } catch (e) {
+          debugPrint('Calling audio failed: $e');
+        }
+      }
+
+      if (_isCaller) {
+        // ── Caller flow ──────────────────────────────────────────────────
+        if (_otherUid.isNotEmpty) {
+          // Direct call to specific user
+          await signaling.createRoom(true, calleeUid: _otherUid);
+        } else {
+          // Fallback: random matchmaking
+          final found = await matchmaking.findRandomMatch(true);
+          if (found != null) {
+            await signaling.joinRoom(found);
+          } else {
+            await signaling.createRoom(true);
+          }
+        }
+      } else {
+        // ── Callee flow ──────────────────────────────────────────────────
+        // _roomId was passed from the incoming call notification
+        if (_roomId.isNotEmpty) {
+          await signaling.joinRoom(_roomId);
+        } else {
           setState(() {
             _connecting = false;
+            _errorMsg = 'Call room not found.';
           });
-          _radarController.stop();
         }
-      });
+      }
 
-      await signaling.openUserMedia(_localRenderer, _remoteRenderer, isVideo: true);
-      
-      // Start ringing while waiting for connection
-      await _audioPlayer.setReleaseMode(ReleaseMode.loop);
-      await _audioPlayer.play(UrlSource('https://www.soundjay.com/phone/phone-calling-1.mp3'));
-      
-      // Find a match or create a room
-      String? roomId = await matchmaking.findRandomMatch(true);
-      if (roomId != null) {
-        await signaling.joinRoom(roomId);
-      } else {
-        roomId = await signaling.createRoom(true);
+      final activeRoomId = signaling.roomId;
+      if (activeRoomId != null && activeRoomId.isNotEmpty) {
+        _roomStatusSub = signaling.listenToRoomStatus(activeRoomId, (status) {
+          if (status == 'ended' && mounted) {
+            _audioPlayer.stop();
+            if (Navigator.canPop(context)) {
+              Navigator.pop(context);
+            }
+          }
+        });
       }
     } catch (e) {
       if (mounted) {
@@ -87,10 +163,27 @@ class _VideoCallScreenState extends State<VideoCallScreen> with SingleTickerProv
     }
   }
 
+  void _startDurationTimer() {
+    _durationTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (mounted) {
+        final elapsed = _callDuration.elapsed;
+        final m = elapsed.inMinutes.toString().padLeft(2, '0');
+        final s = (elapsed.inSeconds % 60).toString().padLeft(2, '0');
+        setState(() => _durationText = '$m:$s');
+      }
+    });
+  }
+
   @override
   void dispose() {
     _radarController.dispose();
     _audioPlayer.dispose();
+    _incomingCallSub?.cancel();
+    _roomStatusSub?.cancel();
+    if (_callDuration.isRunning) {
+      _callDuration.stop();
+      _durationTimer?.cancel();
+    }
     try {
       signaling.hangUp(_localRenderer);
     } catch (_) {}
@@ -115,18 +208,21 @@ class _VideoCallScreenState extends State<VideoCallScreen> with SingleTickerProv
 
   void _endCall() {
     _audioPlayer.stop();
+    if (_callDuration.isRunning) {
+      _callDuration.stop();
+      _durationTimer?.cancel();
+    }
     try {
       signaling.hangUp(_localRenderer);
     } catch (_) {}
-    
-    // Show ad after call, then navigate
+
     AdManager.showInterstitialAd(() {
       if (mounted) {
         Navigator.pushReplacementNamed(context, '/feedback', arguments: {
-          'name': 'Stranger',
-          'otherUid': '', 
-          'callType': 'video', 
-          'durationSeconds': 0,
+          'name': _contactName,
+          'otherUid': _otherUid,
+          'callType': 'video',
+          'durationSeconds': _callDuration.elapsed.inSeconds,
         });
       }
     });
@@ -149,19 +245,19 @@ class _VideoCallScreenState extends State<VideoCallScreen> with SingleTickerProv
                 : const SizedBox.expand(),
           ),
 
-          // 2. Connecting Radar UI
-          if (_connecting && _errorMsg == null) _buildRadarOverlay(),
+          // 2. Connecting / Calling UI
+          if (_connecting && _errorMsg == null) _buildCallingOverlay(),
 
           // 3. Error State
           if (_errorMsg != null) _buildErrorOverlay(),
 
-          // 4. Scrims & Branding
+          // 4. In-call branding + controls
           if (!_connecting && _errorMsg == null) ...[
             _buildTopBranding(),
             _buildBottomControls(),
           ],
 
-          // 5. Local Video (PIP)
+          // 5. Local Video PIP
           if (_errorMsg == null)
             AnimatedPositioned(
               duration: const Duration(milliseconds: 300),
@@ -186,18 +282,25 @@ class _VideoCallScreenState extends State<VideoCallScreen> with SingleTickerProv
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                'Connected with Stranger',
-                style: GoogleFonts.outfit(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w600),
+                _contactName,
+                style: GoogleFonts.outfit(
+                    color: Colors.white,
+                    fontSize: 20,
+                    fontWeight: FontWeight.w700),
               ),
               const SizedBox(height: 4),
               Row(
                 children: [
                   Container(
-                    width: 8, height: 8,
-                    decoration: const BoxDecoration(color: Colors.greenAccent, shape: BoxShape.circle),
+                    width: 8,
+                    height: 8,
+                    decoration: const BoxDecoration(
+                        color: Colors.greenAccent, shape: BoxShape.circle),
                   ),
-                  const SizedBox(width: 8),
-                  Text('End-to-End Encrypted', style: GoogleFonts.inter(color: Colors.white70, fontSize: 12)),
+                  const SizedBox(width: 6),
+                  Text(_durationText,
+                      style: GoogleFonts.inter(
+                          color: Colors.white70, fontSize: 13)),
                 ],
               ),
             ],
@@ -211,9 +314,14 @@ class _VideoCallScreenState extends State<VideoCallScreen> with SingleTickerProv
             ),
             child: Row(
               children: [
-                const Icon(Icons.star_rounded, color: Colors.amber, size: 16),
-                const SizedBox(width: 4),
-                Text('4.8 CRI', style: GoogleFonts.inter(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 13)),
+                const Icon(Icons.lock_rounded,
+                    color: Colors.greenAccent, size: 14),
+                const SizedBox(width: 6),
+                Text('Encrypted',
+                    style: GoogleFonts.inter(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w600,
+                        fontSize: 12)),
               ],
             ),
           ),
@@ -233,14 +341,16 @@ class _VideoCallScreenState extends State<VideoCallScreen> with SingleTickerProv
           gradient: LinearGradient(
             begin: Alignment.bottomCenter,
             end: Alignment.topCenter,
-            colors: [Colors.black.withOpacity(0.8), Colors.transparent],
+            colors: [Colors.black.withOpacity(0.85), Colors.transparent],
           ),
         ),
         child: Row(
           mainAxisAlignment: MainAxisAlignment.spaceEvenly,
           children: [
             _controlBtn(
-              icon: _videoMuted ? Icons.videocam_off_rounded : Icons.videocam_rounded,
+              icon: _videoMuted
+                  ? Icons.videocam_off_rounded
+                  : Icons.videocam_rounded,
               label: 'Video',
               isActive: !_videoMuted,
               onTap: _toggleVideo,
@@ -275,7 +385,12 @@ class _VideoCallScreenState extends State<VideoCallScreen> with SingleTickerProv
     );
   }
 
-  Widget _controlBtn({required IconData icon, required String label, required bool isActive, required VoidCallback onTap, Color? color}) {
+  Widget _controlBtn(
+      {required IconData icon,
+      required String label,
+      required bool isActive,
+      required VoidCallback onTap,
+      Color? color}) {
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -288,7 +403,10 @@ class _VideoCallScreenState extends State<VideoCallScreen> with SingleTickerProv
               child: Container(
                 padding: const EdgeInsets.all(16),
                 decoration: BoxDecoration(
-                  color: color ?? (isActive ? Colors.white.withOpacity(0.2) : Colors.redAccent.withOpacity(0.3)),
+                  color: color ??
+                      (isActive
+                          ? Colors.white.withOpacity(0.2)
+                          : Colors.redAccent.withOpacity(0.3)),
                   shape: BoxShape.circle,
                   border: Border.all(color: Colors.white10),
                 ),
@@ -298,7 +416,11 @@ class _VideoCallScreenState extends State<VideoCallScreen> with SingleTickerProv
           ),
         ),
         const SizedBox(height: 8),
-        Text(label, style: GoogleFonts.inter(color: Colors.white60, fontSize: 11, fontWeight: FontWeight.w500)),
+        Text(label,
+            style: GoogleFonts.inter(
+                color: Colors.white60,
+                fontSize: 11,
+                fontWeight: FontWeight.w500)),
       ],
     );
   }
@@ -310,7 +432,9 @@ class _VideoCallScreenState extends State<VideoCallScreen> with SingleTickerProv
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(20),
         border: Border.all(color: Colors.white24, width: 2),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.3), blurRadius: 20)],
+        boxShadow: [
+          BoxShadow(color: Colors.black.withOpacity(0.3), blurRadius: 20)
+        ],
       ),
       child: ClipRRect(
         borderRadius: BorderRadius.circular(18),
@@ -323,7 +447,7 @@ class _VideoCallScreenState extends State<VideoCallScreen> with SingleTickerProv
     );
   }
 
-  Widget _buildRadarOverlay() {
+  Widget _buildCallingOverlay() {
     return Container(
       width: double.infinity,
       height: double.infinity,
@@ -338,6 +462,7 @@ class _VideoCallScreenState extends State<VideoCallScreen> with SingleTickerProv
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
+            // Contact avatar with radar animation
             AnimatedBuilder(
               animation: _radarController,
               builder: (context, child) {
@@ -345,7 +470,8 @@ class _VideoCallScreenState extends State<VideoCallScreen> with SingleTickerProv
                   alignment: Alignment.center,
                   children: [
                     ...List.generate(3, (index) {
-                      double progress = (_radarController.value + (index / 3)) % 1;
+                      final progress =
+                          (_radarController.value + (index / 3)) % 1;
                       return Opacity(
                         opacity: 1 - progress,
                         child: Container(
@@ -353,7 +479,9 @@ class _VideoCallScreenState extends State<VideoCallScreen> with SingleTickerProv
                           height: 200 * progress,
                           decoration: BoxDecoration(
                             shape: BoxShape.circle,
-                            border: Border.all(color: AppColors.primary.withOpacity(0.5), width: 2),
+                            border: Border.all(
+                                color: AppColors.primary.withOpacity(0.5),
+                                width: 2),
                           ),
                         ),
                       );
@@ -361,22 +489,65 @@ class _VideoCallScreenState extends State<VideoCallScreen> with SingleTickerProv
                     Container(
                       decoration: BoxDecoration(
                         shape: BoxShape.circle,
-                        boxShadow: [BoxShadow(color: AppColors.primary.withOpacity(0.4), blurRadius: 40)],
+                        boxShadow: [
+                          BoxShadow(
+                              color: AppColors.primary.withOpacity(0.4),
+                              blurRadius: 40)
+                        ],
                       ),
-                      child: const CircleAvatar(
-                        radius: 40,
+                      child: CircleAvatar(
+                        radius: 50,
                         backgroundColor: AppColors.primary,
-                        child: Icon(Icons.person_search_rounded, color: Colors.white, size: 40),
+                        backgroundImage: _contactAvatarUrl != null
+                            ? NetworkImage(_contactAvatarUrl!)
+                            : null,
+                        child: _contactAvatarUrl == null
+                            ? Text(
+                                _contactName.isNotEmpty
+                                    ? _contactName[0].toUpperCase()
+                                    : '?',
+                                style: GoogleFonts.outfit(
+                                    color: Colors.white,
+                                    fontSize: 36,
+                                    fontWeight: FontWeight.w700))
+                            : null,
                       ),
                     ),
                   ],
                 );
               },
             ),
-            const SizedBox(height: 48),
-            Text('Looking for a High CRI Match...', style: GoogleFonts.outfit(color: Colors.white, fontSize: 22, fontWeight: FontWeight.w700)),
+            const SizedBox(height: 40),
+            Text(
+              _isCaller
+                  ? 'Calling $_contactName...'
+                  : 'Connecting to $_contactName...',
+              style: GoogleFonts.outfit(
+                  color: Colors.white,
+                  fontSize: 22,
+                  fontWeight: FontWeight.w700),
+            ),
             const SizedBox(height: 12),
-            Text('Finding someone safe and verified for you', style: GoogleFonts.inter(color: Colors.white54, fontSize: 14)),
+            Text(
+              _isCaller
+                  ? 'Waiting for them to answer'
+                  : 'Setting up secure connection',
+              style: GoogleFonts.inter(color: Colors.white54, fontSize: 14),
+            ),
+            const SizedBox(height: 48),
+            // End call button while ringing
+            GestureDetector(
+              onTap: _endCall,
+              child: Container(
+                padding: const EdgeInsets.all(20),
+                decoration: const BoxDecoration(
+                    color: Colors.redAccent, shape: BoxShape.circle),
+                child: const Icon(Icons.call_end_rounded,
+                    color: Colors.white, size: 32),
+              ),
+            ),
+            const SizedBox(height: 12),
+            Text('Cancel', style: GoogleFonts.inter(color: Colors.white60)),
           ],
         ),
       ),
@@ -390,20 +561,31 @@ class _VideoCallScreenState extends State<VideoCallScreen> with SingleTickerProv
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.cloud_off_rounded, color: Colors.redAccent, size: 64),
+            const Icon(Icons.cloud_off_rounded,
+                color: Colors.redAccent, size: 64),
             const SizedBox(height: 24),
-            Text('Connection Failed', style: GoogleFonts.outfit(color: Colors.white, fontSize: 24, fontWeight: FontWeight.w700)),
+            Text('Connection Failed',
+                style: GoogleFonts.outfit(
+                    color: Colors.white,
+                    fontSize: 24,
+                    fontWeight: FontWeight.w700)),
             const SizedBox(height: 12),
-            Text(_errorMsg!, textAlign: TextAlign.center, style: GoogleFonts.inter(color: Colors.white70, fontSize: 16)),
+            Text(_errorMsg!,
+                textAlign: TextAlign.center,
+                style: GoogleFonts.inter(color: Colors.white70, fontSize: 16)),
             const SizedBox(height: 32),
             ElevatedButton(
               onPressed: () => Navigator.pop(context),
               style: ElevatedButton.styleFrom(
                 backgroundColor: AppColors.primary,
-                padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(16)),
               ),
-              child: Text('Return Home', style: GoogleFonts.inter(color: Colors.white, fontWeight: FontWeight.w700)),
+              child: Text('Go Back',
+                  style: GoogleFonts.inter(
+                      color: Colors.white, fontWeight: FontWeight.w700)),
             ),
           ],
         ),

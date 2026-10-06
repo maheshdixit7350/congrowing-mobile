@@ -3,7 +3,6 @@ plugins {
     id("kotlin-android")
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id("dev.flutter.flutter-gradle-plugin")
-    // Add the Google services Gradle plugin
     id("com.google.gms.google-services")
 }
 
@@ -35,8 +34,8 @@ android {
             // TODO: Add your own signing config for the release build.
             // Signing with the debug keys for now, so `flutter run --release` works.
             signingConfig = signingConfigs.getByName("debug")
-            isMinifyEnabled = false
-            isShrinkResources = false
+            isMinifyEnabled = true
+            isShrinkResources = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
@@ -45,15 +44,21 @@ android {
     }
 
     dependencies {
-        // Import the Firebase BoM
-        implementation(platform("com.google.firebase:firebase-bom:34.11.0"))
-        // Firebase products (versions managed by BoM)
-        implementation("com.google.firebase:firebase-analytics")
-        implementation("com.google.firebase:firebase-auth")
-        implementation("com.google.firebase:firebase-firestore")
+        // App dependencies managed by Flutter plugin system
     }
 }
 
 flutter {
     source = "../.."
+}
+
+dependencies {
+    // Firebase BoM — manages all Firebase library versions automatically
+    implementation(platform("com.google.firebase:firebase-bom:33.7.0"))
+
+    // Firebase Analytics (required by google-services plugin)
+    implementation("com.google.firebase:firebase-analytics")
+
+    // Firebase Auth (used by Supabase Google Sign-In via ID token)
+    implementation("com.google.firebase:firebase-auth")
 }

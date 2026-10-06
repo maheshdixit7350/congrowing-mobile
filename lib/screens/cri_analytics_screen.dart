@@ -2,428 +2,1319 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../utils/app_colors.dart';
 import '../utils/nav_utils.dart';
+import '../services/user_service.dart';
+import '../services/daily_missions_service.dart';
+import '../utils/ad_manager.dart';
+import 'iq_challenge_screen.dart';
 import 'dart:math' as math;
 
-class CriAnalyticsScreen extends StatelessWidget {
+class CriAnalyticsScreen extends StatefulWidget {
   const CriAnalyticsScreen({super.key});
 
-  static const _dimensions = [
-    {'label': 'Empathy', 'score': 0.85, 'color': 0xFF6366F1},
-    {'label': 'Logic', 'score': 0.75, 'color': 0xFF7C3AED},
-    {'label': 'Creativity', 'score': 0.70, 'color': 0xFF4F46E5},
-    {'label': 'Reliability', 'score': 0.80, 'color': 0xFF06B6D4},
-    {'label': 'Openness', 'score': 0.65, 'color': 0xFF8B5CF6},
-  ];
+  @override
+  State<CriAnalyticsScreen> createState() => _CriAnalyticsScreenState();
+}
 
-  static const _dimensionDetails = [
-    {'title': 'Empathy', 'desc': 'Ability to understand and share the feelings of others.', 'tip': 'Listen actively to others without judgement.', 'color': 0xFF6366F1},
-    {'title': 'Logic', 'desc': 'Reasoning conducted or assessed according to strict principles.', 'tip': 'Practice solving puzzles and reading analytical articles.', 'color': 0xFF7C3AED},
-    {'title': 'Creativity', 'desc': 'The use of imagination or original ideas.', 'tip': 'Try picking up a new hobby or brainstorming solutions.', 'color': 0xFF4F46E5},
-    {'title': 'Reliability', 'desc': 'The quality of being trustworthy or of performing consistently.', 'tip': 'Keep your promises and be punctual for meetings.', 'color': 0xFF06B6D4},
-    {'title': 'Openness', 'desc': 'Receptiveness to new ideas and experiences.', 'tip': 'Read books outside your usual genre and travel.', 'color': 0xFF8B5CF6},
-  ];
+class _CriAnalyticsScreenState extends State<CriAnalyticsScreen>
+    with TickerProviderStateMixin {
+  List<DailyMission> _missions = [];
+  int _streak = 0;
+  bool _loading = true;
+  late AnimationController _scoreAnimController;
+  late Animation<double> _scoreAnim;
+
+  @override
+  void initState() {
+    super.initState();
+    _scoreAnimController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1200),
+    );
+    _scoreAnim = CurvedAnimation(
+        parent: _scoreAnimController, curve: Curves.easeOutCubic);
+    _loadData();
+  }
+
+  Future<void> _loadData() async {
+    final missions = await DailyMissionsService.instance.getTodayMissions();
+    final streak = await DailyMissionsService.instance.getStreak();
+    if (mounted) {
+      setState(() {
+        _missions = missions;
+        _streak = streak;
+        _loading = false;
+      });
+      _scoreAnimController.forward();
+    }
+  }
+
+  void _resetChartData() {
+    setState(() {
+      _loading = true;
+    });
+    _scoreAnimController.reset();
+    _loadData();
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('CRI Chart data & metrics refreshed cleanly'),
+        backgroundColor: AppColors.primary,
+        duration: Duration(seconds: 2),
+      ),
+    );
+  }
+
+  /// Show call-type bottom sheet (Voice / Video).
+  void _showCallTypeSheet() {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
+        decoration: BoxDecoration(
+          color: isDark ? AppColors.cardDark : Colors.white,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(32)),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                    color: Colors.grey.withOpacity(0.3),
+                    borderRadius: BorderRadius.circular(4))),
+            const SizedBox(height: 24),
+            Text('Connect with someone',
+                style: GoogleFonts.outfit(
+                    fontSize: 22, fontWeight: FontWeight.w700)),
+            const SizedBox(height: 8),
+            Text('How would you like to connect?',
+                style: GoogleFonts.inter(fontSize: 14, color: Colors.grey)),
+            const SizedBox(height: 32),
+            Row(
+              children: [
+                Expanded(
+                  child: GestureDetector(
+                    onTap: () {
+                      Navigator.pop(context);
+                      AdManager.showInterstitialAd(
+                          () => Navigator.pushNamed(context, '/voice-call', arguments: {'isCaller': true}));
+                    },
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(vertical: 20),
+                      decoration: BoxDecoration(
+                        color: AppColors.primary.withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(
+                            color: AppColors.primary.withOpacity(0.3)),
+                      ),
+                      child: Column(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.all(12),
+                            decoration: const BoxDecoration(
+                                color: AppColors.primary,
+                                shape: BoxShape.circle),
+                            child: const Icon(Icons.call,
+                                color: Colors.white, size: 28),
+                          ),
+                          const SizedBox(height: 12),
+                          Text('Voice Call',
+                              style: GoogleFonts.inter(
+                                  fontWeight: FontWeight.w600, fontSize: 16)),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: GestureDetector(
+                    onTap: () {
+                      Navigator.pop(context);
+                      AdManager.showInterstitialAd(
+                          () => Navigator.pushNamed(context, '/video-call', arguments: {'isCaller': true}));
+                    },
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(vertical: 20),
+                      decoration: BoxDecoration(
+                        gradient: const LinearGradient(
+                            colors: [AppColors.primary, Color(0xFF2DD4BF)]),
+                        borderRadius: BorderRadius.circular(20),
+                        boxShadow: [
+                          BoxShadow(
+                              color: AppColors.primary.withOpacity(0.3),
+                              blurRadius: 16,
+                              offset: const Offset(0, 4))
+                        ],
+                      ),
+                      child: Column(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                                color: Colors.white.withOpacity(0.2),
+                                shape: BoxShape.circle),
+                            child: const Icon(Icons.videocam,
+                                color: Colors.white, size: 28),
+                          ),
+                          const SizedBox(height: 12),
+                          Text('Video Call',
+                              style: GoogleFonts.inter(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.w600,
+                                  fontSize: 16)),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Handle mission tap.
+  Future<void> _completeMission(DailyMission mission) async {
+    if (mission.isCompleted) return;
+
+    // Talk → open call sheet
+    if (mission.type == 'talk') {
+      _showCallTypeSheet();
+      return;
+    }
+
+    // Thought → navigate to thoughts/play page
+    if (mission.type == 'thought') {
+      await Navigator.pushNamed(context, '/play');
+      // Mark as completed after returning (user may have shared a thought)
+      await DailyMissionsService.instance.completeMission(mission.id);
+      await _loadData();
+      return;
+    }
+
+    // IQ → open IQ challenge
+    if (mission.type == 'iq') {
+      await Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => const IQChallengeScreen()),
+      );
+      await DailyMissionsService.instance.completeMission(mission.id);
+      await _loadData();
+      return;
+    }
+
+    // Others — show confirm dialog
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Text('Complete Mission?',
+            style: GoogleFonts.inter(fontWeight: FontWeight.w700)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(mission.title,
+                style: GoogleFonts.inter(
+                    fontWeight: FontWeight.w600, fontSize: 16)),
+            const SizedBox(height: 8),
+            Text(mission.description,
+                style: GoogleFonts.inter(fontSize: 14, color: Colors.grey)),
+            const SizedBox(height: 16),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: AppColors.primary.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.trending_up_rounded,
+                      color: AppColors.primary, size: 20),
+                  const SizedBox(width: 8),
+                  Text('+${mission.criReward} CRI',
+                      style: GoogleFonts.inter(
+                          color: AppColors.primary,
+                          fontWeight: FontWeight.w700)),
+                ],
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text('Cancel', style: GoogleFonts.inter()),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.primary,
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12)),
+            ),
+            child: Text('Complete',
+                style: GoogleFonts.inter(
+                    color: Colors.white, fontWeight: FontWeight.w600)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true) {
+      await DailyMissionsService.instance.completeMission(mission.id);
+      await _loadData();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Row(
+              children: [
+                const Icon(Icons.check_circle, color: Colors.white),
+                const SizedBox(width: 8),
+                Text('Mission complete! +${mission.criReward} CRI',
+                    style: GoogleFonts.inter(fontWeight: FontWeight.w600)),
+              ],
+            ),
+            backgroundColor: AppColors.green,
+            behavior: SnackBarBehavior.floating,
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          ),
+        );
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    _scoreAnimController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    final user = UserService.instance.currentUser;
+    final criScore = user?.criScore ?? 0;
+
     return Scaffold(
-      backgroundColor: isDark ? AppColors.backgroundDark : AppColors.backgroundLight,
-      appBar: AppBar(
-        leading: IconButton(icon: const Icon(Icons.arrow_back_ios_new_rounded, size: 18), onPressed: () => safeNavigateBack(context)),
-        title: Text('CRI Analytics', style: GoogleFonts.inter(fontWeight: FontWeight.w700, fontSize: 20)),
-        backgroundColor: isDark ? AppColors.backgroundDark : AppColors.backgroundLight,
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.file_download_outlined, color: AppColors.primary),
-            onPressed: () {
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(
-                  content: Text('Report downloading...', style: GoogleFonts.inter()),
-                  backgroundColor: AppColors.primary,
-                  behavior: SnackBarBehavior.floating,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                ),
-              );
-            },
-          ),
-          IconButton(icon: const Icon(Icons.info_outline_rounded, color: AppColors.primary), onPressed: () {}),
-        ],
-      ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          children: [
-            // Score card
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(24),
-              decoration: BoxDecoration(
-                gradient: AppColors.primaryGradient,
-                borderRadius: BorderRadius.circular(24),
-                boxShadow: [BoxShadow(color: AppColors.primary.withOpacity(0.4), blurRadius: 24, offset: const Offset(0, 10))],
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text('Current CRI Score', style: GoogleFonts.inter(color: Colors.white.withOpacity(0.8), fontSize: 12, fontWeight: FontWeight.w600, letterSpacing: 1)),
-                  const SizedBox(height: 8),
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.end,
-                    children: [
-                      Text('850', style: GoogleFonts.inter(color: Colors.white, fontSize: 56, fontWeight: FontWeight.w900, height: 1)),
-                      const SizedBox(width: 12),
-                      Padding(
-                        padding: const EdgeInsets.only(bottom: 8),
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                          decoration: BoxDecoration(color: Colors.white.withOpacity(0.2), borderRadius: BorderRadius.circular(12)),
-                          child: Row(
+      backgroundColor:
+          isDark ? AppColors.backgroundDark : AppColors.backgroundLight,
+      body: _loading
+          ? const Center(
+              child: CircularProgressIndicator(color: AppColors.primary))
+          : CustomScrollView(
+              slivers: [
+                // Custom SliverAppBar with gradient
+                SliverAppBar(
+                  expandedHeight: 280,
+                  pinned: true,
+                  leading: IconButton(
+                    icon: Container(
+                      padding: const EdgeInsets.all(6),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withOpacity(0.2),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: const Icon(Icons.arrow_back_ios_new_rounded,
+                          size: 16, color: Colors.white),
+                    ),
+                    onPressed: () => safeNavigateBack(context),
+                  ),
+                  actions: [
+                    IconButton(
+                      tooltip: 'Clean & Refresh Chart Data',
+                      icon: Container(
+                        padding: const EdgeInsets.all(6),
+                        decoration: BoxDecoration(
+                          color: Colors.white.withOpacity(0.2),
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: const Icon(Icons.cleaning_services_rounded,
+                            size: 16, color: Colors.white),
+                      ),
+                      onPressed: _resetChartData,
+                    ),
+                    const SizedBox(width: 8),
+                  ],
+                  backgroundColor: const Color(0xFF4F46E5),
+                  flexibleSpace: FlexibleSpaceBar(
+                    background: Container(
+                      decoration: const BoxDecoration(
+                        gradient: LinearGradient(
+                          colors: [
+                            Color(0xFF7C3AED),
+                            Color(0xFF4F46E5),
+                            Color(0xFF06B6D4)
+                          ],
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                        ),
+                      ),
+                      child: SafeArea(
+                        child: Padding(
+                          padding: const EdgeInsets.fromLTRB(24, 50, 24, 24),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              const Icon(Icons.trending_up_rounded, color: Colors.white, size: 14),
-                              const SizedBox(width: 4),
-                              Text('+12.5%', style: GoogleFonts.inter(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w700)),
+                              Row(
+                                children: [
+                                  Text('CRI Analytics',
+                                      style: GoogleFonts.inter(
+                                          color: Colors.white,
+                                          fontSize: 24,
+                                          fontWeight: FontWeight.w800)),
+                                  const Spacer(),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 12, vertical: 6),
+                                    decoration: BoxDecoration(
+                                      color: Colors.white.withOpacity(0.2),
+                                      borderRadius: BorderRadius.circular(20),
+                                    ),
+                                    child: Row(
+                                      children: [
+                                        const Icon(
+                                            Icons.local_fire_department_rounded,
+                                            color: Colors.orangeAccent,
+                                            size: 16),
+                                        const SizedBox(width: 4),
+                                        Text('$_streak day streak',
+                                            style: GoogleFonts.inter(
+                                                color: Colors.white,
+                                                fontSize: 12,
+                                                fontWeight: FontWeight.w700)),
+                                      ],
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 20),
+                              // Big Score Display
+                              AnimatedBuilder(
+                                animation: _scoreAnim,
+                                builder: (context, _) {
+                                  final displayScore =
+                                      (criScore * _scoreAnim.value).round();
+                                  return Row(
+                                    crossAxisAlignment: CrossAxisAlignment.end,
+                                    children: [
+                                      Text(
+                                        '$displayScore',
+                                        style: GoogleFonts.inter(
+                                          color: Colors.white,
+                                          fontSize: 72,
+                                          fontWeight: FontWeight.w900,
+                                          height: 1,
+                                        ),
+                                      ),
+                                      Padding(
+                                        padding: const EdgeInsets.only(
+                                            bottom: 12, left: 8),
+                                        child: Text('/1000',
+                                            style: GoogleFonts.inter(
+                                                color: Colors.white60,
+                                                fontSize: 20,
+                                                fontWeight: FontWeight.w600)),
+                                      ),
+                                    ],
+                                  );
+                                },
+                              ),
+                              const SizedBox(height: 12),
+                              // Level indicator
+                              Row(
+                                children: [
+                                  _buildLevelBadge(criScore),
+                                  const SizedBox(width: 12),
+                                  Text(
+                                    'Character Rating Index',
+                                    style: GoogleFonts.inter(
+                                        color: Colors.white70,
+                                        fontSize: 13,
+                                        fontWeight: FontWeight.w500),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 16),
+                              // CRI progress bar
+                              ClipRRect(
+                                borderRadius: BorderRadius.circular(10),
+                                child: LinearProgressIndicator(
+                                  value: criScore / 1000,
+                                  backgroundColor:
+                                      Colors.white.withOpacity(0.2),
+                                  valueColor:
+                                      const AlwaysStoppedAnimation<Color>(
+                                          Colors.white),
+                                  minHeight: 8,
+                                ),
+                              ),
                             ],
                           ),
                         ),
                       ),
-                    ],
-                  ),
-                  const SizedBox(height: 4),
-                  Text('Top 20% of all users', style: GoogleFonts.inter(color: Colors.white.withOpacity(0.7), fontSize: 13)),
-                  const SizedBox(height: 16),
-                  Container(
-                    width: double.infinity,
-                    height: 1,
-                    color: Colors.white.withOpacity(0.2),
-                  ),
-                  const SizedBox(height: 16),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      _buildStatColumn('Current Rank', 'Silver III'),
-                      _buildStatColumn('Percentile', '82nd'),
-                      _buildStatColumn('Streaks', '14 days'),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-
-            const SizedBox(height: 24),
-
-            // Radar chart
-            Container(
-              padding: const EdgeInsets.all(20),
-              decoration: BoxDecoration(
-                color: isDark ? AppColors.cardDark : Colors.white,
-                borderRadius: BorderRadius.circular(24),
-                border: Border.all(color: isDark ? Colors.grey.shade800 : Colors.grey.shade100),
-              ),
-              child: Column(
-                children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Text('Dimension Breakdown', style: GoogleFonts.inter(fontWeight: FontWeight.w700, fontSize: 16)),
-                      Icon(Icons.pie_chart_outline_rounded, color: AppColors.primary, size: 20),
-                    ],
-                  ),
-                  const SizedBox(height: 24),
-                  Center(
-                    child: CustomPaint(
-                      size: const Size(200, 200),
-                      painter: _RadarChartPainter(),
                     ),
                   ),
-                  const SizedBox(height: 24),
-                  // Dimension bars
-                  ..._dimensions.map((d) => Padding(
-                    padding: const EdgeInsets.only(bottom: 14),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            Text(d['label'] as String, style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.w600)),
-                            Text('${((d['score'] as double) * 100).toInt()}%',
-                                style: GoogleFonts.inter(fontSize: 12, color: Color(d['color'] as int), fontWeight: FontWeight.w700)),
-                          ],
-                        ),
-                        const SizedBox(height: 6),
-                        ClipRRect(
-                          borderRadius: BorderRadius.circular(8),
-                          child: LinearProgressIndicator(
-                            value: d['score'] as double,
-                            backgroundColor: Colors.grey.shade100,
-                            valueColor: AlwaysStoppedAnimation<Color>(Color(d['color'] as int)),
-                            minHeight: 10,
-                          ),
-                        ),
-                      ],
-                    ),
-                  )),
-                ],
-              ),
+                ),
+
+                // Daily Missions Section
+                SliverToBoxAdapter(
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 24, 20, 0),
+                    child: _buildDailyMissions(isDark),
+                  ),
+                ),
+
+                // Dimension Breakdown
+                SliverToBoxAdapter(
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
+                    child: _buildDimensionBreakdown(isDark, user),
+                  ),
+                ),
+
+                // Score History
+                SliverToBoxAdapter(
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
+                    child: _buildScoreHistory(isDark),
+                  ),
+                ),
+
+                // How CRI Works
+                SliverToBoxAdapter(
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
+                    child: _buildHowCriWorks(isDark),
+                  ),
+                ),
+
+                // Improvement Tips
+                SliverToBoxAdapter(
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
+                    child: _buildImprovementTips(isDark),
+                  ),
+                ),
+
+                const SliverToBoxAdapter(child: SizedBox(height: 40)),
+              ],
             ),
+    );
+  }
 
-            const SizedBox(height: 16),
+  Widget _buildLevelBadge(int score) {
+    String level;
+    Color color;
+    if (score >= 900) {
+      level = 'Diamond';
+      color = const Color(0xFF60A5FA);
+    } else if (score >= 700) {
+      level = 'Gold';
+      color = const Color(0xFFFBBF24);
+    } else if (score >= 500) {
+      level = 'Silver';
+      color = const Color(0xFF9CA3AF);
+    } else if (score >= 300) {
+      level = 'Bronze';
+      color = const Color(0xFFF97316);
+    } else {
+      level = 'Starter';
+      color = const Color(0xFF10B981);
+    }
 
-            // History
-            Container(
-              padding: const EdgeInsets.all(20),
-              decoration: BoxDecoration(
-                color: isDark ? AppColors.cardDark : Colors.white,
-                borderRadius: BorderRadius.circular(24),
-                border: Border.all(color: isDark ? Colors.grey.shade800 : Colors.grey.shade100),
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.3),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: color.withOpacity(0.5)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.shield_rounded, color: color, size: 14),
+          const SizedBox(width: 4),
+          Text(level,
+              style: GoogleFonts.inter(
+                  color: Colors.white,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700)),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDailyMissions(bool isDark) {
+    final completed = _missions.where((m) => m.isCompleted).length;
+    final total = _missions.length;
+    final progress = total > 0 ? completed / total : 0.0;
+
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: isDark ? AppColors.cardDark : Colors.white,
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(
+            color: isDark ? Colors.grey.shade800 : Colors.grey.shade100),
+        boxShadow: isDark
+            ? []
+            : [
+                BoxShadow(
+                    color: Colors.black.withOpacity(0.04),
+                    blurRadius: 16,
+                    offset: const Offset(0, 4)),
+              ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Header
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  gradient: const LinearGradient(
+                      colors: [Color(0xFFF59E0B), Color(0xFFEF4444)]),
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: const Icon(Icons.rocket_launch_rounded,
+                    color: Colors.white, size: 22),
               ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Text('Score History', style: GoogleFonts.inter(fontWeight: FontWeight.w700, fontSize: 16)),
-                      Icon(Icons.timeline_rounded, color: AppColors.primary, size: 20),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Daily Missions',
+                        style: GoogleFonts.inter(
+                            fontWeight: FontWeight.w800, fontSize: 18)),
+                    Text('$completed/$total completed',
+                        style: GoogleFonts.inter(
+                            fontSize: 12,
+                            color: isDark ? Colors.white54 : Colors.grey)),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+
+          // Progress bar
+          Stack(
+            children: [
+              Container(
+                height: 12,
+                decoration: BoxDecoration(
+                  color:
+                      isDark ? Colors.grey.shade800 : const Color(0xFFF1F5F9),
+                  borderRadius: BorderRadius.circular(6),
+                ),
+              ),
+              AnimatedContainer(
+                duration: const Duration(milliseconds: 600),
+                curve: Curves.easeOutCubic,
+                height: 12,
+                width: (MediaQuery.of(context).size.width - 80) * progress,
+                decoration: BoxDecoration(
+                  gradient: const LinearGradient(
+                    colors: [
+                      Color(0xFF7C3AED),
+                      Color(0xFF4F46E5),
+                      Color(0xFF06B6D4)
                     ],
                   ),
-                  const SizedBox(height: 24),
-                  SizedBox(
-                    height: 150,
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceAround,
-                      crossAxisAlignment: CrossAxisAlignment.end,
-                      children: [
-                        _HistoryBar(month: 'Oct', score: 720, max: 1000),
-                        _HistoryBar(month: 'Nov', score: 780, max: 1000),
-                        _HistoryBar(month: 'Dec', score: 800, max: 1000),
-                        _HistoryBar(month: 'Jan', score: 820, max: 1000),
-                        _HistoryBar(month: 'Feb', score: 840, max: 1000),
-                        _HistoryBar(month: 'Mar', score: 850, max: 1000, isActive: true),
-                      ],
-                    ),
-                  ),
-                ],
+                  borderRadius: BorderRadius.circular(6),
+                  boxShadow: [
+                    BoxShadow(
+                        color: AppColors.primary.withOpacity(0.4),
+                        blurRadius: 6,
+                        offset: const Offset(0, 2)),
+                  ],
+                ),
               ),
-            ),
+            ],
+          ),
+          const SizedBox(height: 20),
 
-            const SizedBox(height: 16),
+          // Mission list
+          ...List.generate(_missions.length, (i) {
+            final mission = _missions[i];
+            return _buildMissionCard(mission, isDark, i);
+          }),
 
-            // Peer Comparison
+          if (completed == total && total > 0) ...[
+            const SizedBox(height: 8),
             Container(
-              padding: const EdgeInsets.all(20),
-              decoration: BoxDecoration(
-                color: isDark ? AppColors.cardDark : Colors.white,
-                borderRadius: BorderRadius.circular(24),
-                border: Border.all(color: isDark ? Colors.grey.shade800 : Colors.grey.shade100),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text('Peer Comparison', style: GoogleFonts.inter(fontWeight: FontWeight.w700, fontSize: 16)),
-                  const SizedBox(height: 16),
-                  Text('You are scoring well above the average user on our platform.', style: GoogleFonts.inter(fontSize: 13, color: isDark ? Colors.white70 : Colors.black54)),
-                  const SizedBox(height: 24),
-                  _buildComparisonRow('Empathy', 85, 60, isDark),
-                  const SizedBox(height: 16),
-                  _buildComparisonRow('Logic', 75, 50, isDark),
-                  const SizedBox(height: 16),
-                  _buildComparisonRow('Creativity', 70, 75, isDark),
-                  const SizedBox(height: 16),
-                  Row(
-                    children: [
-                      Container(width: 12, height: 12, decoration: const BoxDecoration(color: AppColors.primary, shape: BoxShape.circle)),
-                      const SizedBox(width: 6),
-                      Text('You', style: GoogleFonts.inter(fontSize: 12, color: isDark ? Colors.white54 : Colors.grey)),
-                      const SizedBox(width: 16),
-                      Container(width: 12, height: 12, decoration: BoxDecoration(color: Colors.grey.shade300, shape: BoxShape.circle)),
-                      const SizedBox(width: 6),
-                      Text('Average', style: GoogleFonts.inter(fontSize: 12, color: isDark ? Colors.white54 : Colors.grey)),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-
-            const SizedBox(height: 16),
-
-            Text('IMPROVEMENT TIPS', style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.primary, letterSpacing: 1.2)),
-            const SizedBox(height: 16),
-            ..._dimensionDetails.map((item) => Container(
-              margin: const EdgeInsets.only(bottom: 12),
+              width: double.infinity,
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
-                color: isDark ? AppColors.cardDark : Colors.white,
+                gradient: const LinearGradient(
+                    colors: [Color(0xFF10B981), Color(0xFF06B6D4)]),
                 borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: isDark ? Colors.grey.shade800 : Colors.grey.shade100),
               ),
               child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Container(
-                    width: 48,
-                    height: 48,
-                    decoration: BoxDecoration(
-                      color: Color(item['color'] as int).withOpacity(0.1),
-                      borderRadius: BorderRadius.circular(12),
+                  const Icon(Icons.celebration_rounded,
+                      color: Colors.white, size: 20),
+                  const SizedBox(width: 8),
+                  Text('All missions completed! 🎉',
+                      style: GoogleFonts.inter(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w700,
+                          fontSize: 15)),
+                ],
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMissionCard(DailyMission mission, bool isDark, int index) {
+    IconData iconData;
+    Color iconColor;
+
+    switch (mission.type) {
+      case 'talk':
+        iconData = Icons.call_rounded;
+        iconColor = const Color(0xFF10B981);
+        break;
+      case 'quiz':
+        iconData = Icons.quiz_rounded;
+        iconColor = const Color(0xFFF59E0B);
+        break;
+      case 'grammar':
+        iconData = Icons.menu_book_rounded;
+        iconColor = const Color(0xFF3B82F6);
+        break;
+      case 'iq':
+        iconData = Icons.psychology_rounded;
+        iconColor = const Color(0xFF8B5CF6);
+        break;
+      case 'puzzle':
+        iconData = Icons.extension_rounded;
+        iconColor = const Color(0xFFEF4444);
+        break;
+      case 'thought':
+        iconData = Icons.lightbulb_rounded;
+        iconColor = const Color(0xFFF97316);
+        break;
+      default:
+        iconData = Icons.star_rounded;
+        iconColor = AppColors.primary;
+    }
+
+    return GestureDetector(
+      onTap: () => _completeMission(mission),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 300),
+        margin: const EdgeInsets.only(bottom: 10),
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: mission.isCompleted
+              ? (isDark
+                  ? AppColors.green.withOpacity(0.1)
+                  : const Color(0xFFF0FDF4))
+              : (isDark ? Colors.grey.shade900 : const Color(0xFFFAFAFA)),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: mission.isCompleted
+                ? AppColors.green.withOpacity(0.3)
+                : (isDark ? Colors.grey.shade800 : Colors.grey.shade200),
+          ),
+        ),
+        child: Row(
+          children: [
+            // Mission icon
+            Container(
+              width: 44,
+              height: 44,
+              decoration: BoxDecoration(
+                color: iconColor.withOpacity(0.12),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Icon(iconData, color: iconColor, size: 22),
+            ),
+            const SizedBox(width: 12),
+            // Title + description
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    mission.title,
+                    style: GoogleFonts.inter(
+                      fontWeight: FontWeight.w700,
+                      fontSize: 14,
+                      decoration: mission.isCompleted
+                          ? TextDecoration.lineThrough
+                          : null,
+                      color: mission.isCompleted ? Colors.grey : null,
                     ),
-                    child: Icon(Icons.tips_and_updates_rounded, color: Color(item['color'] as int), size: 24),
                   ),
-                  const SizedBox(width: 16),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(item['title'] as String, style: GoogleFonts.inter(fontSize: 15, fontWeight: FontWeight.w700)),
-                        const SizedBox(height: 4),
-                        Text(item['desc'] as String, style: GoogleFonts.inter(fontSize: 12, color: isDark ? Colors.white60 : Colors.black54)),
-                        const SizedBox(height: 8),
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                          decoration: BoxDecoration(
-                            color: Color(item['color'] as int).withOpacity(0.1),
-                            borderRadius: BorderRadius.circular(6),
-                          ),
-                          child: Text('Tip: ${item['tip']}', style: GoogleFonts.inter(fontSize: 11, color: Color(item['color'] as int), fontWeight: FontWeight.w600)),
-                        ),
-                      ],
-                    ),
+                  const SizedBox(height: 2),
+                  Text(
+                    mission.description,
+                    style: GoogleFonts.inter(
+                        fontSize: 11,
+                        color: isDark ? Colors.white38 : Colors.grey.shade500),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                   ),
                 ],
               ),
-            )),
+            ),
+            const SizedBox(width: 8),
+            // Checkbox (auto-checked when completed)
+            AnimatedContainer(
+              duration: const Duration(milliseconds: 300),
+              width: 26,
+              height: 26,
+              decoration: BoxDecoration(
+                color:
+                    mission.isCompleted ? AppColors.green : Colors.transparent,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(
+                  color: mission.isCompleted
+                      ? AppColors.green
+                      : (isDark ? Colors.grey.shade600 : Colors.grey.shade400),
+                  width: 2,
+                ),
+              ),
+              child: mission.isCompleted
+                  ? const Icon(Icons.check_rounded,
+                      color: Colors.white, size: 16)
+                  : null,
+            ),
           ],
         ),
       ),
     );
   }
 
-  Widget _buildStatColumn(String label, String value) {
-    return Column(
-      children: [
-        Text(value, style: GoogleFonts.inter(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w700)),
-        const SizedBox(height: 4),
-        Text(label, style: GoogleFonts.inter(color: Colors.white.withOpacity(0.7), fontSize: 11)),
-      ],
+  Widget _buildDimensionBreakdown(bool isDark, dynamic user) {
+    final empathy = (user?.avgEmpathy ?? 5.0) / 10.0;
+    final respect = (user?.respectRate ?? 0.0) / 100.0;
+    final listen = (user?.listenRate ?? 0.0) / 100.0;
+    final totalCalls = (user?.totalCalls ?? 0) as int;
+    final engagement = math.min(totalCalls / 20.0, 1.0);
+    final creativity = _missions.isEmpty
+        ? 0.5
+        : _missions.where((m) => m.isCompleted).length / _missions.length;
+
+    final dimensions = [
+      {
+        'label': 'Empathy',
+        'score': empathy,
+        'color': 0xFF6366F1,
+        'icon': Icons.favorite_rounded
+      },
+      {
+        'label': 'Respect',
+        'score': respect,
+        'color': 0xFF7C3AED,
+        'icon': Icons.handshake_rounded
+      },
+      {
+        'label': 'Listening',
+        'score': listen,
+        'color': 0xFF06B6D4,
+        'icon': Icons.hearing_rounded
+      },
+      {
+        'label': 'Engagement',
+        'score': engagement,
+        'color': 0xFF10B981,
+        'icon': Icons.trending_up_rounded
+      },
+      {
+        'label': 'Growth',
+        'score': creativity,
+        'color': 0xFFF59E0B,
+        'icon': Icons.auto_awesome_rounded
+      },
+    ];
+
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: isDark ? AppColors.cardDark : Colors.white,
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(
+            color: isDark ? Colors.grey.shade800 : Colors.grey.shade100),
+        boxShadow: isDark
+            ? []
+            : [
+                BoxShadow(
+                    color: Colors.black.withOpacity(0.04),
+                    blurRadius: 16,
+                    offset: const Offset(0, 4)),
+              ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 3,
+                height: 22,
+                decoration: BoxDecoration(
+                  gradient: AppColors.primaryGradient,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Text('Dimension Breakdown',
+                  style: GoogleFonts.outfit(
+                      fontWeight: FontWeight.w800,
+                      fontSize: 20,
+                      color: isDark ? Colors.white : const Color(0xFF0F172A))),
+              const Spacer(),
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  gradient: AppColors.primaryGradient,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: const Icon(Icons.radar_rounded,
+                    color: Colors.white, size: 18),
+              ),
+            ],
+          ),
+          const SizedBox(height: 20),
+          Center(
+            child: CustomPaint(
+              size: const Size(220, 220),
+              painter: _RadarChartPainter(
+                scores: dimensions.map((d) => d['score'] as double).toList(),
+                labels: dimensions.map((d) => d['label'] as String).toList(),
+                isDark: isDark,
+              ),
+            ),
+          ),
+          const SizedBox(height: 24),
+          ...dimensions.map((d) => Padding(
+                padding: const EdgeInsets.only(bottom: 14),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Icon(d['icon'] as IconData,
+                            color: Color(d['color'] as int), size: 16),
+                        const SizedBox(width: 8),
+                        Text(d['label'] as String,
+                            style: GoogleFonts.inter(
+                                fontSize: 13, fontWeight: FontWeight.w600)),
+                        const Spacer(),
+                        Text(
+                          '${((d['score'] as double) * 100).toInt()}%',
+                          style: GoogleFonts.inter(
+                              fontSize: 12,
+                              color: Color(d['color'] as int),
+                              fontWeight: FontWeight.w700),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                    Stack(
+                      children: [
+                        Container(
+                          height: 10,
+                          width: double.infinity,
+                          decoration: BoxDecoration(
+                            color: isDark
+                                ? AppColors.cardDarkElevated
+                                : const Color(0xFFF1F5F9),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                        ),
+                        FractionallySizedBox(
+                          widthFactor: d['score'] as double,
+                          child: Container(
+                            height: 10,
+                            decoration: BoxDecoration(
+                              gradient: LinearGradient(
+                                colors: [
+                                  Color(d['color'] as int).withValues(alpha: 0.6),
+                                  Color(d['color'] as int),
+                                ],
+                              ),
+                              borderRadius: BorderRadius.circular(8),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: Color(d['color'] as int).withValues(alpha: 0.35),
+                                  blurRadius: 6,
+                                  offset: const Offset(0, 2),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              )),
+        ],
+      ),
     );
   }
 
-  Widget _buildComparisonRow(String label, double youScore, double avgScore, bool isDark) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+  Widget _buildScoreHistory(bool isDark) {
+    final uid = UserService.instance.currentUser?.id;
+    if (uid == null) return const SizedBox.shrink();
+
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: isDark ? AppColors.cardDark : Colors.white,
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(
+            color: isDark ? Colors.grey.shade800 : Colors.grey.shade100),
+        boxShadow: isDark
+            ? []
+            : [
+                BoxShadow(
+                    color: Colors.black.withOpacity(0.04),
+                    blurRadius: 16,
+                    offset: const Offset(0, 4)),
+              ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 3,
+                height: 22,
+                decoration: BoxDecoration(
+                  gradient: AppColors.cyanGradient,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Text('Score History',
+                  style: GoogleFonts.outfit(
+                      fontWeight: FontWeight.w800,
+                      fontSize: 20,
+                      color: isDark ? Colors.white : const Color(0xFF0F172A))),
+              const Spacer(),
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  gradient: AppColors.cyanGradient,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: const Icon(Icons.show_chart_rounded,
+                    color: Colors.white, size: 18),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Your CRI score changes based on call feedback and daily activities.',
+            style: GoogleFonts.inter(
+                fontSize: 12, color: isDark ? Colors.white54 : Colors.grey),
+          ),
+          const SizedBox(height: 24),
+          Builder(
+            builder: (context) {
+              final user = UserService.instance.currentUser;
+              final score = user?.criScore ?? 0;
+              final reviews = user?.totalReviews ?? 0;
+              final calls = user?.totalCalls ?? 0;
+
+              return Row(
+                children: [
+                  _buildStatCard('Current\nScore', '$score',
+                      const Color(0xFF7C3AED), isDark),
+                  const SizedBox(width: 10),
+                  _buildStatCard('Total\nReviews', '$reviews',
+                      const Color(0xFF06B6D4), isDark),
+                  const SizedBox(width: 10),
+                  _buildStatCard('Total\nCalls', '$calls',
+                      const Color(0xFF10B981), isDark),
+                ],
+              );
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildStatCard(String label, String value, Color color, bool isDark) {
+    return Expanded(
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: color.withOpacity(isDark ? 0.15 : 0.08),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: color.withOpacity(0.2)),
+        ),
+        child: Column(
           children: [
-            Text(label, style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.w600)),
-            Text('${youScore.toInt()}% vs ${avgScore.toInt()}%', style: GoogleFonts.inter(fontSize: 12, color: isDark ? Colors.white54 : Colors.grey)),
+            Text(value,
+                style: GoogleFonts.inter(
+                    fontSize: 28, fontWeight: FontWeight.w900, color: color)),
+            const SizedBox(height: 4),
+            Text(label,
+                style: GoogleFonts.inter(
+                    fontSize: 11,
+                    color: isDark ? Colors.white54 : Colors.grey,
+                    height: 1.3),
+                textAlign: TextAlign.center),
           ],
         ),
-        const SizedBox(height: 8),
-        Stack(
-          children: [
-            Container(height: 12, decoration: BoxDecoration(color: Colors.grey.shade100, borderRadius: BorderRadius.circular(6))),
-            LayoutBuilder(
-              builder: (ctx, constraints) {
-                return Stack(
+      ),
+    );
+  }
+
+  Widget _buildHowCriWorks(bool isDark) {
+    final items = [
+      {
+        'icon': Icons.call_rounded,
+        'title': 'Make Calls',
+        'desc': 'Connect with people to get reviewed',
+        'color': const Color(0xFF10B981)
+      },
+      {
+        'icon': Icons.rate_review_rounded,
+        'title': 'Get Feedback',
+        'desc': 'Other users rate your conversation skills',
+        'color': const Color(0xFF3B82F6)
+      },
+      {
+        'icon': Icons.trending_up_rounded,
+        'title': 'Score Updates',
+        'desc': 'Your CRI recalculates based on reviews',
+        'color': const Color(0xFF7C3AED)
+      },
+      {
+        'icon': Icons.people_rounded,
+        'title': 'Match Better',
+        'desc': 'Higher CRI = better conversation partners',
+        'color': const Color(0xFFF59E0B)
+      },
+    ];
+
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: isDark ? AppColors.cardDark : Colors.white,
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(
+            color: isDark ? Colors.grey.shade800 : Colors.grey.shade100),
+        boxShadow: isDark
+            ? []
+            : [
+                BoxShadow(
+                    color: Colors.black.withOpacity(0.04),
+                    blurRadius: 16,
+                    offset: const Offset(0, 4)),
+              ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('How CRI Works',
+              style:
+                  GoogleFonts.inter(fontWeight: FontWeight.w800, fontSize: 18)),
+          const SizedBox(height: 4),
+          Text(
+            'CRI (Character Rating Index) reflects your conversation quality.',
+            style: GoogleFonts.inter(
+                fontSize: 12, color: isDark ? Colors.white54 : Colors.grey),
+          ),
+          const SizedBox(height: 16),
+          ...items.map((item) => Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: Row(
                   children: [
                     Container(
-                      width: constraints.maxWidth * (youScore / 100),
-                      height: 12,
-                      decoration: BoxDecoration(color: AppColors.primary, borderRadius: BorderRadius.circular(6)),
+                      width: 44,
+                      height: 44,
+                      decoration: BoxDecoration(
+                        color: (item['color'] as Color).withOpacity(0.12),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Icon(item['icon'] as IconData,
+                          color: item['color'] as Color, size: 22),
                     ),
-                    Positioned(
-                      left: constraints.maxWidth * (avgScore / 100),
-                      top: 0,
-                      bottom: 0,
-                      child: Container(
-                        width: 4,
-                        decoration: BoxDecoration(
-                          color: Colors.grey.shade600,
-                          borderRadius: BorderRadius.circular(2),
-                        ),
+                    const SizedBox(width: 14),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(item['title'] as String,
+                              style: GoogleFonts.inter(
+                                  fontWeight: FontWeight.w700, fontSize: 14)),
+                          Text(item['desc'] as String,
+                              style: GoogleFonts.inter(
+                                  fontSize: 12,
+                                  color:
+                                      isDark ? Colors.white38 : Colors.grey)),
+                        ],
                       ),
                     ),
                   ],
-                );
-              },
-            ),
-          ],
-        ),
-      ],
+                ),
+              )),
+        ],
+      ),
     );
   }
-}
 
-class _HistoryBar extends StatelessWidget {
-  final String month;
-  final int score;
-  final int max;
-  final bool isActive;
+  Widget _buildImprovementTips(bool isDark) {
+    final tips = [
+      {
+        'icon': Icons.hearing_rounded,
+        'title': 'Active Listening',
+        'tip':
+            'Focus on understanding before responding. Ask follow-up questions.',
+        'color': const Color(0xFF6366F1)
+      },
+      {
+        'icon': Icons.favorite_rounded,
+        'title': 'Show Empathy',
+        'tip': 'Acknowledge feelings and share related experiences.',
+        'color': const Color(0xFFEF4444)
+      },
+      {
+        'icon': Icons.schedule_rounded,
+        'title': 'Be Consistent',
+        'tip': 'Regular conversations build trust and improve scores.',
+        'color': const Color(0xFF10B981)
+      },
+      {
+        'icon': Icons.lightbulb_rounded,
+        'title': 'Daily Missions',
+        'tip': 'Complete daily missions to boost your CRI score.',
+        'color': const Color(0xFFF59E0B)
+      },
+    ];
 
-  const _HistoryBar({required this.month, required this.score, required this.max, this.isActive = false});
-
-  @override
-  Widget build(BuildContext context) {
-    final height = 100.0 * score / max;
-    return Column(
-      mainAxisAlignment: MainAxisAlignment.end,
-      children: [
-        Text('$score', style: GoogleFonts.inter(fontSize: 10, color: isActive ? AppColors.primary : AppColors.textSecondaryLight, fontWeight: FontWeight.w600)),
-        const SizedBox(height: 4),
-        Container(
-          width: 32,
-          height: 100,
-          alignment: Alignment.bottomCenter,
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 800),
-            curve: Curves.easeOut,
-            height: height,
-            decoration: BoxDecoration(
-              gradient: isActive ? AppColors.primaryGradient : null,
-              color: isActive ? null : Colors.grey.shade200,
-              borderRadius: BorderRadius.circular(8),
-            ),
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: isDark ? AppColors.cardDark : Colors.white,
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(
+            color: isDark ? Colors.grey.shade800 : Colors.grey.shade100),
+        boxShadow: isDark
+            ? []
+            : [
+                BoxShadow(
+                    color: Colors.black.withOpacity(0.04),
+                    blurRadius: 16,
+                    offset: const Offset(0, 4)),
+              ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.tips_and_updates_rounded,
+                  color: AppColors.primary, size: 22),
+              const SizedBox(width: 8),
+              Text('Improvement Tips',
+                  style: GoogleFonts.inter(
+                      fontWeight: FontWeight.w800, fontSize: 18)),
+            ],
           ),
-        ),
-        const SizedBox(height: 8),
-        Text(month, style: GoogleFonts.inter(fontSize: 11, color: isActive ? AppColors.primary : AppColors.textSecondaryLight, fontWeight: isActive ? FontWeight.w700 : FontWeight.w500)),
-      ],
+          const SizedBox(height: 16),
+          ...tips.map((item) => Container(
+                margin: const EdgeInsets.only(bottom: 10),
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: (item['color'] as Color)
+                      .withOpacity(isDark ? 0.08 : 0.05),
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(
+                      color: (item['color'] as Color).withOpacity(0.15)),
+                ),
+                child: Row(
+                  children: [
+                    Icon(item['icon'] as IconData,
+                        color: item['color'] as Color, size: 22),
+                    const SizedBox(width: 14),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(item['title'] as String,
+                              style: GoogleFonts.inter(
+                                  fontWeight: FontWeight.w700, fontSize: 14)),
+                          const SizedBox(height: 2),
+                          Text(item['tip'] as String,
+                              style: GoogleFonts.inter(
+                                  fontSize: 12,
+                                  color:
+                                      isDark ? Colors.white38 : Colors.grey)),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              )),
+        ],
+      ),
     );
   }
 }
 
 class _RadarChartPainter extends CustomPainter {
+  final List<double> scores;
+  final List<String> labels;
+  final bool isDark;
+
+  _RadarChartPainter(
+      {required this.scores, required this.labels, this.isDark = false});
+
   @override
   void paint(Canvas canvas, Size size) {
     final center = Offset(size.width / 2, size.height / 2);
-    final radius = size.width / 2 - 10;
-    
+    final radius = size.width / 2 - 30;
+
     final bgPaint = Paint()
-      ..color = const Color(0xFFF8FAFC)
+      ..color = isDark ? const Color(0xFF1E1E1E) : const Color(0xFFF8FAFC)
       ..style = PaintingStyle.fill;
-    
-    // Draw background circle
-    canvas.drawCircle(center, radius, bgPaint);
-    
+
+    canvas.drawCircle(center, radius + 5, bgPaint);
+
     final gridPaint = Paint()
-      ..color = Colors.grey.withOpacity(0.2)
+      ..color = (isDark ? Colors.white : Colors.grey).withOpacity(0.15)
       ..style = PaintingStyle.stroke
       ..strokeWidth = 1.0;
-      
+
     final fillPaint = Paint()
-      ..color = const Color(0xFF7C3AED).withOpacity(0.3)
+      ..color = const Color(0xFF7C3AED).withOpacity(0.25)
       ..style = PaintingStyle.fill;
-      
+
     final strokePaint = Paint()
       ..color = const Color(0xFF7C3AED)
       ..style = PaintingStyle.stroke
-      ..strokeWidth = 2.0;
+      ..strokeWidth = 2.5;
 
-    const int sides = 5;
+    final int sides = scores.length;
     final double angleStep = (2 * math.pi) / sides;
     const double startAngle = -math.pi / 2;
 
-    // Draw concentric polygons (web)
     for (int ring = 1; ring <= 4; ring++) {
       final r = radius * ring / 4;
       final path = Path();
@@ -431,41 +1322,64 @@ class _RadarChartPainter extends CustomPainter {
         final angle = startAngle + i * angleStep;
         final x = center.dx + r * math.cos(angle);
         final y = center.dy + r * math.sin(angle);
-        if (i == 0) path.moveTo(x, y);
-        else path.lineTo(x, y);
+        if (i == 0) {
+          path.moveTo(x, y);
+        } else {
+          path.lineTo(x, y);
+        }
       }
       path.close();
       canvas.drawPath(path, gridPaint);
     }
-    
-    // Draw spokes
-    for(int i = 0; i < sides; i++) {
+
+    for (int i = 0; i < sides; i++) {
       final angle = startAngle + i * angleStep;
       final x = center.dx + radius * math.cos(angle);
       final y = center.dy + radius * math.sin(angle);
       canvas.drawLine(center, Offset(x, y), gridPaint);
     }
 
-    // Draw data polygon
-    final scores = [0.85, 0.75, 0.70, 0.80, 0.65];
     final dataPath = Path();
     for (int i = 0; i < sides; i++) {
       final angle = startAngle + i * angleStep;
-      final r = radius * scores[i];
+      final r = radius * scores[i].clamp(0.0, 1.0);
       final x = center.dx + r * math.cos(angle);
       final y = center.dy + r * math.sin(angle);
-      if (i == 0) dataPath.moveTo(x, y);
-      else dataPath.lineTo(x, y);
-      
-      // Draw points at vertices
-      canvas.drawCircle(Offset(x,y), 4, Paint()..color = const Color(0xFF6366F1));
+      if (i == 0) {
+        dataPath.moveTo(x, y);
+      } else {
+        dataPath.lineTo(x, y);
+      }
+
+      canvas.drawCircle(
+          Offset(x, y), 5, Paint()..color = const Color(0xFF6366F1));
+      canvas.drawCircle(Offset(x, y), 3, Paint()..color = Colors.white);
     }
     dataPath.close();
     canvas.drawPath(dataPath, fillPaint);
     canvas.drawPath(dataPath, strokePaint);
-    
-    // Draw center point
-    canvas.drawCircle(center, 3, Paint()..color = Colors.grey.shade400);
+
+    for (int i = 0; i < sides; i++) {
+      final angle = startAngle + i * angleStep;
+      final labelRadius = radius + 20;
+      final x = center.dx + labelRadius * math.cos(angle);
+      final y = center.dy + labelRadius * math.sin(angle);
+
+      final textPainter = TextPainter(
+        text: TextSpan(
+          text: labels[i],
+          style: TextStyle(
+            fontSize: 10,
+            fontWeight: FontWeight.w600,
+            color: isDark ? Colors.white54 : Colors.grey.shade600,
+          ),
+        ),
+        textDirection: TextDirection.ltr,
+      );
+      textPainter.layout();
+      textPainter.paint(canvas,
+          Offset(x - textPainter.width / 2, y - textPainter.height / 2));
+    }
   }
 
   @override

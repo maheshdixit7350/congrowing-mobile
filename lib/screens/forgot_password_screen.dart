@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../utils/app_colors.dart';
 import '../utils/nav_utils.dart';
+import '../services/supabase_auth_service.dart';
+import '../main.dart' show supabaseInitialized;
 
 class ForgotPasswordScreen extends StatefulWidget {
   const ForgotPasswordScreen({super.key});
@@ -36,17 +38,35 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen>
   }
 
   void _resetPassword() async {
+    final email = _emailCtrl.text.trim();
     setState(() => _errorMessage = null);
-    if (_emailCtrl.text.trim().isEmpty || !_emailCtrl.text.contains('@')) {
+    if (email.isEmpty || !email.contains('@')) {
       setState(() => _errorMessage = 'Please enter a valid email address');
       return;
     }
     setState(() => _loading = true);
-    await Future.delayed(const Duration(milliseconds: 1500));
-    if (mounted) {
+
+    if (!supabaseInitialized) {
       setState(() {
+        _errorMessage = 'Backend not connected. Please restart the app.';
         _loading = false;
-        _sent = true;
+      });
+      return;
+    }
+
+    try {
+      await SupabaseAuthService.instance.resetPassword(email);
+      if (mounted) {
+        setState(() {
+          _loading = false;
+          _sent = true;
+        });
+      }
+    } catch (e) {
+      setState(() {
+        _errorMessage =
+            'Failed to send reset email: ${e.toString().split('\n')[0]}';
+        _loading = false;
       });
     }
   }
@@ -280,7 +300,7 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen>
             color: AppColors.green.withAlpha(26),
             shape: BoxShape.circle,
           ),
-          child: Icon(Icons.check_circle_rounded,
+          child: const Icon(Icons.check_circle_rounded,
               color: AppColors.green, size: 44),
         ),
         const SizedBox(height: 20),

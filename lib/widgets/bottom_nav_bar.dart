@@ -1,6 +1,8 @@
+import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../utils/app_colors.dart';
+import '../services/user_service.dart';
 
 class BottomNavBar extends StatelessWidget {
   final int currentIndex;
@@ -10,11 +12,6 @@ class BottomNavBar extends StatelessWidget {
   void _onItemTapped(BuildContext context, int index) {
     final routes = ['/home', '/call', '/messages', '/play', '/my-profile'];
     if (index != currentIndex) {
-      // Use pushNamedAndRemoveUntil so there's always a clean nav stack.
-      // This prevents blank screens when pressing back.
-      // We keep the route predicate as false to clear the stack, then the
-      // new screen becomes the root. The WillPopScope / PopScope in each
-      // bottom-nav screen handles the system back button.
       Navigator.pushNamedAndRemoveUntil(
         context,
         routes[index],
@@ -26,94 +23,205 @@ class BottomNavBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    return Container(
-      decoration: BoxDecoration(
-        color: isDark ? AppColors.backgroundDark.withOpacity(0.95) : Colors.white.withOpacity(0.95),
-        borderRadius: const BorderRadius.only(
-          topLeft: Radius.circular(24),
-          topRight: Radius.circular(24),
-        ),
-        border: Border(
-          top: BorderSide(
-            color: isDark ? Colors.grey.shade800 : Colors.grey.shade200,
-            width: 0.5,
-          ),
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.06),
-            blurRadius: 20,
-            offset: const Offset(0, -4),
-          ),
-        ],
+
+    return ClipRRect(
+      borderRadius: const BorderRadius.only(
+        topLeft: Radius.circular(28),
+        topRight: Radius.circular(28),
       ),
-      child: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+        child: Container(
+          decoration: BoxDecoration(
+            color: isDark
+                ? const Color(0xFF0F1629).withValues(alpha: 0.92)
+                : Colors.white.withValues(alpha: 0.94),
+            borderRadius: const BorderRadius.only(
+              topLeft: Radius.circular(28),
+              topRight: Radius.circular(28),
+            ),
+            border: Border(
+              top: BorderSide(
+                color: isDark
+                    ? Colors.white.withValues(alpha: 0.06)
+                    : Colors.black.withValues(alpha: 0.06),
+                width: 1,
+              ),
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: isDark
+                    ? Colors.black.withValues(alpha: 0.4)
+                    : Colors.black.withValues(alpha: 0.08),
+                blurRadius: 32,
+                offset: const Offset(0, -8),
+              ),
+            ],
+          ),
+          child: SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceAround,
+                children: [
+                  _AnimatedNavItem(
+                    icon: Icons.home_rounded,
+                    outlineIcon: Icons.home_outlined,
+                    label: 'Home',
+                    index: 0,
+                    currentIndex: currentIndex,
+                    onTap: () => _onItemTapped(context, 0),
+                    isDark: isDark,
+                  ),
+                  _AnimatedNavItem(
+                    icon: Icons.call_rounded,
+                    outlineIcon: Icons.call_outlined,
+                    label: 'Connect',
+                    index: 1,
+                    currentIndex: currentIndex,
+                    onTap: () => _onItemTapped(context, 1),
+                    isDark: isDark,
+                  ),
+                  _AnimatedNavItem(
+                    icon: Icons.chat_bubble_rounded,
+                    outlineIcon: Icons.chat_bubble_outline_rounded,
+                    label: 'Chat',
+                    index: 2,
+                    currentIndex: currentIndex,
+                    onTap: () => _onItemTapped(context, 2),
+                    isDark: isDark,
+                  ),
+                  _AnimatedNavItem(
+                    icon: Icons.lightbulb_rounded,
+                    outlineIcon: Icons.lightbulb_outline_rounded,
+                    label: 'Play',
+                    index: 3,
+                    currentIndex: currentIndex,
+                    onTap: () => _onItemTapped(context, 3),
+                    isDark: isDark,
+                  ),
+                  _ProfileNavItem(
+                    index: 4,
+                    currentIndex: currentIndex,
+                    onTap: () => _onItemTapped(context, 4),
+                    isDark: isDark,
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _AnimatedNavItem extends StatefulWidget {
+  final IconData icon;
+  final IconData outlineIcon;
+  final String label;
+  final int index;
+  final int currentIndex;
+  final VoidCallback onTap;
+  final bool isDark;
+
+  const _AnimatedNavItem({
+    required this.icon,
+    required this.outlineIcon,
+    required this.label,
+    required this.index,
+    required this.currentIndex,
+    required this.onTap,
+    required this.isDark,
+  });
+
+  @override
+  State<_AnimatedNavItem> createState() => _AnimatedNavItemState();
+}
+
+class _AnimatedNavItemState extends State<_AnimatedNavItem>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _ctrl;
+  late Animation<double> _scaleAnim;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 150),
+    );
+    _scaleAnim = Tween<double>(begin: 1.0, end: 0.88).animate(
+      CurvedAnimation(parent: _ctrl, curve: Curves.easeIn),
+    );
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  bool get isActive => widget.index == widget.currentIndex;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTapDown: (_) => _ctrl.forward(),
+      onTapUp: (_) {
+        _ctrl.reverse();
+        widget.onTap();
+      },
+      onTapCancel: () => _ctrl.reverse(),
+      child: ScaleTransition(
+        scale: _scaleAnim,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 250),
+          curve: Curves.easeInOut,
+          padding: EdgeInsets.symmetric(
+            horizontal: isActive ? 16 : 10,
+            vertical: 8,
+          ),
+          decoration: BoxDecoration(
+            color: isActive
+                ? AppColors.primary.withValues(alpha: 0.12)
+                : Colors.transparent,
+            borderRadius: BorderRadius.circular(20),
+          ),
           child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            mainAxisSize: MainAxisSize.min,
             children: [
-              _NavItem(
-                icon: Icons.home_rounded,
-                index: 0,
-                currentIndex: currentIndex,
-                onTap: () => _onItemTapped(context, 0),
-              ),
-              _NavItem(
-                icon: Icons.call_rounded,
-                index: 1,
-                currentIndex: currentIndex,
-                onTap: () => _onItemTapped(context, 1),
-              ),
-              _NavItem(
-                icon: Icons.chat_bubble_rounded,
-                index: 2,
-                currentIndex: currentIndex,
-                onTap: () => _onItemTapped(context, 2),
-              ),
-              _NavItem(
-                icon: Icons.smart_display_rounded,
-                index: 3,
-                currentIndex: currentIndex,
-                onTap: () => _onItemTapped(context, 3),
-              ),
-              GestureDetector(
-                onTap: () => _onItemTapped(context, 4),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Container(
-                      width: 28,
-                      height: 28,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        border: Border.all(
-                          color: currentIndex == 4 ? AppColors.primary : Colors.transparent,
-                          width: 2,
-                        ),
-                      ),
-                      child: ClipOval(
-                        child: CachedNetworkImage(
-                          imageUrl:
-                              'https://lh3.googleusercontent.com/aida-public/AB6AXuCCphgPcz225mSJx5UUnQf3LRfEjXZ95vXgbNUEASwrhXMdPjJdc1jIMzYe8ZVAnJrHE9XPJTKaaIC7RL31x-CMLRK1q2j_gXTDwThBkmGWnm6cMkZIvqECe_qkQlMbqDXG39bMZgoxthG5kR4q5GKjFrTJW5QQE14dfrXSzvMaXm483i2bLmBcqEM6eWdf9_EVDjvAox2zd257BJG3v2t9bA41RPKx8tPDN38O7RAjaAFeolU329Idfe3E6MLFxc9rOs20FIOio28',
-                          fit: BoxFit.cover,
-                          placeholder: (c, u) => Container(color: Colors.grey.shade200),
-                          errorWidget: (c, u, e) => const Icon(Icons.person),
-                        ),
-                      ),
-                    ),
-                    if (currentIndex == 4)
-                      Container(
-                        margin: const EdgeInsets.only(top: 3),
-                        width: 4,
-                        height: 4,
-                        decoration: const BoxDecoration(
-                          shape: BoxShape.circle,
-                          color: AppColors.primary,
-                        ),
-                      ),
-                  ],
+              AnimatedSwitcher(
+                duration: const Duration(milliseconds: 200),
+                child: Icon(
+                  isActive ? widget.icon : widget.outlineIcon,
+                  key: ValueKey(isActive),
+                  size: 22,
+                  color: isActive
+                      ? AppColors.primary
+                      : (widget.isDark
+                          ? AppColors.textSecondaryDark
+                          : AppColors.textSecondaryLight),
                 ),
+              ),
+              AnimatedSize(
+                duration: const Duration(milliseconds: 250),
+                curve: Curves.easeInOut,
+                child: isActive
+                    ? Row(
+                        children: [
+                          const SizedBox(width: 6),
+                          Text(
+                            widget.label,
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w700,
+                              color: AppColors.primary,
+                            ),
+                          ),
+                        ],
+                      )
+                    : const SizedBox.shrink(),
               ),
             ],
           ),
@@ -123,43 +231,157 @@ class BottomNavBar extends StatelessWidget {
   }
 }
 
-class _NavItem extends StatelessWidget {
-  final IconData icon;
+class _ProfileNavItem extends StatefulWidget {
   final int index;
   final int currentIndex;
   final VoidCallback onTap;
+  final bool isDark;
 
-  const _NavItem({
-    required this.icon,
+  const _ProfileNavItem({
     required this.index,
     required this.currentIndex,
     required this.onTap,
+    required this.isDark,
   });
 
   @override
+  State<_ProfileNavItem> createState() => _ProfileNavItemState();
+}
+
+class _ProfileNavItemState extends State<_ProfileNavItem>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _ctrl;
+  late Animation<double> _scaleAnim;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 150),
+    );
+    _scaleAnim = Tween<double>(begin: 1.0, end: 0.88).animate(
+      CurvedAnimation(parent: _ctrl, curve: Curves.easeIn),
+    );
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  bool get isActive => widget.index == widget.currentIndex;
+
+  @override
   Widget build(BuildContext context) {
-    final isActive = index == currentIndex;
+    final user = UserService.instance.currentUser;
+    final initial = user?.name.isNotEmpty == true
+        ? user!.name[0].toUpperCase()
+        : 'U';
+
     return GestureDetector(
-      onTap: onTap,
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(
-            icon,
-            size: 28,
-            color: isActive ? AppColors.primary : AppColors.textSecondaryLight,
+      onTapDown: (_) => _ctrl.forward(),
+      onTapUp: (_) {
+        _ctrl.reverse();
+        widget.onTap();
+      },
+      onTapCancel: () => _ctrl.reverse(),
+      child: ScaleTransition(
+        scale: _scaleAnim,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 250),
+          curve: Curves.easeInOut,
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+          decoration: BoxDecoration(
+            color: isActive
+                ? AppColors.primary.withValues(alpha: 0.12)
+                : Colors.transparent,
+            borderRadius: BorderRadius.circular(20),
           ),
-          if (isActive)
-            Container(
-              margin: const EdgeInsets.only(top: 3),
-              width: 4,
-              height: 4,
-              decoration: const BoxDecoration(
-                shape: BoxShape.circle,
-                color: AppColors.primary,
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              AnimatedContainer(
+                duration: const Duration(milliseconds: 250),
+                width: 26,
+                height: 26,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  gradient: isActive ? AppColors.primaryGradient : null,
+                  color: isActive
+                      ? null
+                      : (widget.isDark
+                          ? AppColors.cardDarkElevated
+                          : AppColors.cardLightElevated),
+                  border: isActive
+                      ? null
+                      : Border.all(
+                          color: widget.isDark
+                              ? AppColors.dividerDark
+                              : AppColors.dividerLight,
+                          width: 1.5,
+                        ),
+                  boxShadow: isActive
+                      ? [
+                          BoxShadow(
+                            color: AppColors.primary.withValues(alpha: 0.35),
+                            blurRadius: 8,
+                            offset: const Offset(0, 2),
+                          ),
+                        ]
+                      : [],
+                ),
+                child: ClipOval(
+                  child: user?.avatarUrl != null &&
+                          user!.avatarUrl!.isNotEmpty
+                      ? CachedNetworkImage(
+                          imageUrl: user.avatarUrl!,
+                          fit: BoxFit.cover,
+                          placeholder: (c, u) => _initialsWidget(initial),
+                          errorWidget: (c, u, e) => _initialsWidget(initial),
+                        )
+                      : _initialsWidget(initial),
+                ),
               ),
-            ),
-        ],
+              AnimatedSize(
+                duration: const Duration(milliseconds: 250),
+                curve: Curves.easeInOut,
+                child: isActive
+                    ? Row(
+                        children: [
+                          const SizedBox(width: 6),
+                          Text(
+                            'Profile',
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w700,
+                              color: AppColors.primary,
+                            ),
+                          ),
+                        ],
+                      )
+                    : const SizedBox.shrink(),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _initialsWidget(String initial) {
+    return Container(
+      color: AppColors.primary.withValues(alpha: 0.15),
+      child: Center(
+        child: Text(
+          initial,
+          style: const TextStyle(
+            color: AppColors.primary,
+            fontWeight: FontWeight.bold,
+            fontSize: 11,
+          ),
+        ),
       ),
     );
   }

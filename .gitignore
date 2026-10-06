@@ -43,3 +43,15 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# Local log files and build output dumps
+*_full.txt
+*_log.txt
+*_log*.txt
+*_verbose*.log
+build_output.txt
+flutter_path.txt
+flutter_version.txt
+/tmp/
+.agents/
+

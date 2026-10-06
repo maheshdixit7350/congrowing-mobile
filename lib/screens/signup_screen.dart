@@ -1,13 +1,12 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:firebase_auth/firebase_auth.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:google_sign_in/google_sign_in.dart';
 import '../utils/app_colors.dart';
-import '../models/user_model.dart';
-import '../main.dart' show firebaseInitialized;
+import '../main.dart' show supabaseInitialized;
 import '../services/user_service.dart';
+import '../services/supabase_auth_service.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 class SignupScreen extends StatefulWidget {
   const SignupScreen({super.key});
@@ -20,15 +19,22 @@ class _SignupScreenState extends State<SignupScreen>
     with SingleTickerProviderStateMixin {
   final _nameCtrl = TextEditingController();
   final _emailCtrl = TextEditingController();
+  final _usernameCtrl = TextEditingController();
   final _passwordCtrl = TextEditingController();
   final _confirmPasswordCtrl = TextEditingController();
+  String? _selectedGender;
   bool _obscurePassword = true;
   bool _obscureConfirm = true;
   bool _agreeTerms = false;
   String? _errorMessage;
+  String? _usernameErrorMessage;
+  bool _isCheckingUsername = false;
+  bool _isUsernameAvailable = false;
   bool _loading = false;
+  bool _googleLoading = false;
   late AnimationController _animCtrl;
   late Animation<double> _fadeAnim;
+  Timer? _debounceTimer;
 
   @override
   void initState() {
@@ -44,9 +50,65 @@ class _SignupScreenState extends State<SignupScreen>
     _animCtrl.dispose();
     _nameCtrl.dispose();
     _emailCtrl.dispose();
+    _usernameCtrl.dispose();
     _passwordCtrl.dispose();
     _confirmPasswordCtrl.dispose();
+    _debounceTimer?.cancel();
     super.dispose();
+  }
+
+  void _onUsernameChanged(String value) {
+    if (_debounceTimer?.isActive ?? false) _debounceTimer?.cancel();
+
+    final cleanValue = value.trim().toLowerCase();
+    if (cleanValue.isEmpty) {
+      setState(() {
+        _usernameErrorMessage = null;
+        _isCheckingUsername = false;
+        _isUsernameAvailable = false;
+      });
+      return;
+    }
+
+    if (cleanValue.length < 3) {
+      setState(() {
+        _usernameErrorMessage = 'Username too short';
+        _isCheckingUsername = false;
+        _isUsernameAvailable = false;
+      });
+      return;
+    }
+
+    setState(() => _isCheckingUsername = true);
+
+    _debounceTimer = Timer(const Duration(milliseconds: 600), () async {
+      if (!supabaseInitialized) {
+        if (mounted) setState(() => _isCheckingUsername = false);
+        return;
+      }
+      try {
+        final res = await Supabase.instance.client
+            .from('users')
+            .select()
+            .eq('username', cleanValue)
+            .limit(1);
+
+        if (mounted) {
+          setState(() {
+            _isCheckingUsername = false;
+            if (res.isNotEmpty) {
+              _usernameErrorMessage = 'Username already taken';
+              _isUsernameAvailable = false;
+            } else {
+              _usernameErrorMessage = null;
+              _isUsernameAvailable = true;
+            }
+          });
+        }
+      } catch (e) {
+        if (mounted) setState(() => _isCheckingUsername = false);
+      }
+    });
   }
 
   void _signup() async {
@@ -54,13 +116,17 @@ class _SignupScreenState extends State<SignupScreen>
 
     final name = _nameCtrl.text.trim();
     final email = _emailCtrl.text.trim();
+    final username = _usernameCtrl.text.trim().toLowerCase();
     final password = _passwordCtrl.text;
 
     if (name.isEmpty ||
         email.isEmpty ||
+        username.isEmpty ||
+        _selectedGender == null ||
         password.isEmpty ||
         _confirmPasswordCtrl.text.isEmpty) {
-      setState(() => _errorMessage = 'Please fill in all fields');
+      setState(
+          () => _errorMessage = 'Please fill in all fields (including gender)');
       return;
     }
     if (!email.contains('@')) {
@@ -82,44 +148,60 @@ class _SignupScreenState extends State<SignupScreen>
 
     setState(() => _loading = true);
 
-    // If Firebase is not initialized, skip but still navigate
-    if (!firebaseInitialized) {
+    if (!supabaseInitialized) {
+      await Future.delayed(
+          const Duration(milliseconds: 600)); // Simulate network request
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool('isLoggedIn', true);
+      await prefs.setString('proto_name', name);
+      await prefs.setString('proto_username', username);
+      await UserService.instance.loadCurrentUser();
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text('Account created successfully!', style: GoogleFonts.inter()),
-          backgroundColor: AppColors.green,
+          content: Text('Welcome to ConGrowing (Prototype), $name!',
+              style: GoogleFonts.inter(fontWeight: FontWeight.w600)),
+          backgroundColor: Colors.orange.shade700,
           behavior: SnackBarBehavior.floating,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         ));
-        Navigator.pushReplacementNamed(context, '/login');
+        Navigator.pushReplacementNamed(context, '/profile-setup');
       }
       return;
     }
-    
+
     try {
-      // 1. Create user in Firebase Auth
-      final userCredential = await FirebaseAuth.instance.createUserWithEmailAndPassword(
+      // Check Username uniqueness on Supabase
+      try {
+        final res = await Supabase.instance.client
+            .from('users')
+            .select()
+            .eq('username', username)
+            .limit(1);
+        if (res.isNotEmpty) {
+          setState(() {
+            _errorMessage =
+                'Username "@$username" is already taken. Please choose another one.';
+            _loading = false;
+          });
+          return;
+        }
+      } catch (_) {
+        // Proceed if table is not configured yet
+      }
+
+      final user =
+          await SupabaseAuthService.instance.signUpWithEmailAndPassword(
+        name: name,
         email: email,
+        username: username,
         password: password,
+        gender: _selectedGender,
       );
 
-      final user = userCredential.user;
       if (user != null) {
-        // 2. Create user document in Firestore
-        final newUser = UserModel(
-          id: user.uid,
-          name: name,
-          username: email.split('@')[0],
-          email: email,
-          createdAt: DateTime.now(),
-        );
-
-        await FirebaseFirestore.instance
-            .collection('users')
-            .doc(user.uid)
-            .set(newUser.toJson());
-
-        // Auto-login: load user then go to home
+        // Auto-login: load user then go to home.
+        // Navigation is driven by the authStateChanges listener in main.dart.
         final prefs = await SharedPreferences.getInstance();
         await prefs.setBool('isLoggedIn', true);
         await UserService.instance.loadCurrentUser();
@@ -127,29 +209,83 @@ class _SignupScreenState extends State<SignupScreen>
 
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content: Text('Welcome to ConGrowing, $name!', style: GoogleFonts.inter(fontWeight: FontWeight.w600)),
+            content: Text('Welcome to ConGrowing, $name!',
+                style: GoogleFonts.inter(fontWeight: FontWeight.w600)),
             backgroundColor: AppColors.green,
             behavior: SnackBarBehavior.floating,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
           ));
-          Navigator.pushReplacementNamed(context, '/home');
         }
       }
-    } on FirebaseAuthException catch (e) {
-      setState(() {
-        if (e.code == 'weak-password') {
-          _errorMessage = 'The password provided is too weak.';
-        } else if (e.code == 'email-already-in-use') {
-          _errorMessage = 'The account already exists for that email.';
-        } else {
-          _errorMessage = e.message ?? 'Signup failed. Please try again.';
-        }
-        _loading = false;
-      });
     } catch (e) {
       setState(() {
-        _errorMessage = 'An error occurred. Please try again.';
+        _errorMessage = e.toString().contains('User already exists')
+            ? 'The account already exists for that email.'
+            : 'An error occurred: ${e.toString().split('\n')[0]}';
         _loading = false;
+      });
+    }
+  }
+
+  // ── Google Sign-In ──────────────────────────────────────────────────────
+  void _signInWithGoogle() async {
+    if (!supabaseInitialized) {
+      setState(() => _googleLoading = true);
+      await Future.delayed(
+          const Duration(milliseconds: 600)); // Simulate network request
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool('isLoggedIn', true);
+      await UserService.instance.loadCurrentUser();
+      final onboardingDone = await UserService.instance.isOnboardingComplete();
+      if (mounted) {
+        setState(() => _googleLoading = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Running in Prototype Mode (Offline)',
+              style: GoogleFonts.inter(fontWeight: FontWeight.w600),
+            ),
+            backgroundColor: Colors.orange.shade700,
+            behavior: SnackBarBehavior.floating,
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          ),
+        );
+        if (onboardingDone) {
+          Navigator.pushReplacementNamed(context, '/home');
+        } else {
+          Navigator.pushReplacementNamed(context, '/profile-setup');
+        }
+      }
+      return;
+    }
+
+    setState(() {
+      _googleLoading = true;
+      _errorMessage = null;
+    });
+
+    try {
+      final user = await SupabaseAuthService.instance.signInWithGoogle();
+      if (user != null) {
+        // Navigation is driven by the authStateChanges listener in main.dart.
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setBool('isLoggedIn', true);
+        await UserService.instance.loadCurrentUser();
+        await UserService.instance.setOnlineStatus(true);
+        if (mounted) {
+          setState(() => _googleLoading = false);
+        }
+      } else {
+        // User cancelled
+        setState(() => _googleLoading = false);
+      }
+    } catch (e) {
+      debugPrint('SUPABASE GOOGLE SIGNUP ERROR: $e');
+      setState(() {
+        _errorMessage = 'Google Sign-In failed. Please try again.';
+        _googleLoading = false;
       });
     }
   }
@@ -254,11 +390,107 @@ class _SignupScreenState extends State<SignupScreen>
                             ],
 
                             const SizedBox(height: 20),
-                            _buildField('FULL NAME', _nameCtrl, 'Enter your full name',
-                                Icons.person_outline),
+
+                            // ── Google Sign-In Button ─────────────────────
+                            GestureDetector(
+                              onTap: _googleLoading ? null : _signInWithGoogle,
+                              child: Container(
+                                height: 52,
+                                decoration: BoxDecoration(
+                                  color: Colors.white,
+                                  borderRadius: BorderRadius.circular(14),
+                                  border: Border.all(
+                                      color: Colors.grey.shade200, width: 1.5),
+                                  boxShadow: [
+                                    BoxShadow(
+                                        color: Colors.black.withAlpha(10),
+                                        blurRadius: 12,
+                                        offset: const Offset(0, 4)),
+                                  ],
+                                ),
+                                child: Row(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    if (_googleLoading)
+                                      const SizedBox(
+                                          width: 22,
+                                          height: 22,
+                                          child: CircularProgressIndicator(
+                                              strokeWidth: 2.5))
+                                    else ...[
+                                      SizedBox(
+                                        width: 22,
+                                        height: 22,
+                                        child: Image.network(
+                                          'https://upload.wikimedia.org/wikipedia/commons/thumb/c/c1/Google_%22G%22_logo.svg/120px-Google_%22G%22_logo.svg.png',
+                                          fit: BoxFit.contain,
+                                          errorBuilder: (c, e, s) => const Icon(
+                                              Icons.g_mobiledata,
+                                              size: 26,
+                                              color: Colors.blue),
+                                        ),
+                                      ),
+                                      const SizedBox(width: 12),
+                                      Text(
+                                        'Continue with Google',
+                                        style: GoogleFonts.inter(
+                                          fontSize: 14,
+                                          fontWeight: FontWeight.w600,
+                                          color: Colors.grey.shade800,
+                                        ),
+                                      ),
+                                    ],
+                                  ],
+                                ),
+                              ),
+                            ),
+
+                            const SizedBox(height: 20),
+
+                            // Divider
+                            Row(
+                              children: [
+                                Expanded(
+                                    child: Container(
+                                        height: 1,
+                                        color: Colors.grey.shade200)),
+                                Padding(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 16),
+                                  child: Text('or sign up with email',
+                                      style: GoogleFonts.inter(
+                                          fontSize: 11,
+                                          color: Colors.grey.shade400,
+                                          letterSpacing: 0.5)),
+                                ),
+                                Expanded(
+                                    child: Container(
+                                        height: 1,
+                                        color: Colors.grey.shade200)),
+                              ],
+                            ),
+
+                            const SizedBox(height: 20),
+
+                            _buildField('FULL NAME', _nameCtrl,
+                                'Enter your full name', Icons.person_outline),
+                            const SizedBox(height: 14),
+                            _buildField(
+                                'USERNAME',
+                                _usernameCtrl,
+                                'Choose a unique username',
+                                Icons.alternate_email,
+                                onChanged: _onUsernameChanged,
+                                errorText: _usernameErrorMessage,
+                                successText: _isUsernameAvailable
+                                    ? 'Username available ✓'
+                                    : null,
+                                isLoading: _isCheckingUsername),
                             const SizedBox(height: 14),
                             _buildField('EMAIL', _emailCtrl, 'Enter your email',
                                 Icons.email_outlined),
+                            const SizedBox(height: 14),
+                            _buildGenderDropdown(),
                             const SizedBox(height: 14),
                             _buildField(
                               'PASSWORD',
@@ -306,8 +538,8 @@ class _SignupScreenState extends State<SignupScreen>
                                   height: 20,
                                   child: Checkbox(
                                     value: _agreeTerms,
-                                    onChanged: (v) =>
-                                        setState(() => _agreeTerms = v ?? false),
+                                    onChanged: (v) => setState(
+                                        () => _agreeTerms = v ?? false),
                                     activeColor: AppColors.loginSecondary,
                                     shape: RoundedRectangleBorder(
                                         borderRadius: BorderRadius.circular(4)),
@@ -316,15 +548,15 @@ class _SignupScreenState extends State<SignupScreen>
                                 const SizedBox(width: 8),
                                 Expanded(
                                   child: GestureDetector(
-                                    onTap: () => Navigator.pushNamed(
-                                        context, '/terms'),
+                                    onTap: () =>
+                                        Navigator.pushNamed(context, '/terms'),
                                     child: RichText(
                                       text: TextSpan(
                                         style: GoogleFonts.inter(
                                             fontSize: 11,
                                             color: Colors.grey.shade500),
-                                        children: [
-                                          const TextSpan(text: 'I agree to the '),
+                                        children: const [
+                                          TextSpan(text: 'I agree to the '),
                                           TextSpan(
                                             text: 'Terms of Service',
                                             style: TextStyle(
@@ -332,7 +564,7 @@ class _SignupScreenState extends State<SignupScreen>
                                               fontWeight: FontWeight.w600,
                                             ),
                                           ),
-                                          const TextSpan(text: ' & '),
+                                          TextSpan(text: ' & '),
                                           TextSpan(
                                             text: 'Privacy Policy',
                                             style: TextStyle(
@@ -439,29 +671,48 @@ class _SignupScreenState extends State<SignupScreen>
     IconData prefixIcon, {
     bool obscure = false,
     Widget? suffixIcon,
+    void Function(String)? onChanged,
+    String? errorText,
+    String? successText,
+    bool isLoading = false,
   }) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          label,
-          style: GoogleFonts.inter(
-            fontSize: 10,
-            fontWeight: FontWeight.w600,
-            color: Colors.grey.shade500,
-            letterSpacing: 1.0,
-          ),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text(
+              label,
+              style: GoogleFonts.inter(
+                fontSize: 10,
+                fontWeight: FontWeight.w600,
+                color: Colors.grey.shade500,
+                letterSpacing: 1.0,
+              ),
+            ),
+            if (isLoading)
+              const SizedBox(
+                  width: 12,
+                  height: 12,
+                  child: CircularProgressIndicator(
+                      strokeWidth: 2, color: Colors.grey))
+          ],
         ),
         const SizedBox(height: 6),
         Container(
           decoration: BoxDecoration(
             color: Colors.grey.shade50,
             borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: Colors.grey.shade200),
+            border: Border.all(
+                color: errorText != null
+                    ? Colors.red.shade200
+                    : Colors.grey.shade200),
           ),
           child: TextField(
             controller: controller,
             obscureText: obscure,
+            onChanged: onChanged,
             style: GoogleFonts.inter(fontSize: 14, color: Colors.grey.shade900),
             decoration: InputDecoration(
               hintText: hint,
@@ -477,6 +728,75 @@ class _SignupScreenState extends State<SignupScreen>
               border: InputBorder.none,
               contentPadding:
                   const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+            ),
+          ),
+        ),
+        if (errorText != null)
+          Padding(
+            padding: const EdgeInsets.only(top: 4, left: 4),
+            child: Text(errorText,
+                style: GoogleFonts.inter(
+                    color: Colors.red.shade700,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w500)),
+          )
+        else if (successText != null)
+          Padding(
+            padding: const EdgeInsets.only(top: 4, left: 4),
+            child: Text(successText,
+                style: GoogleFonts.inter(
+                    color: Colors.green.shade700,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w500)),
+          )
+      ],
+    );
+  }
+
+  Widget _buildGenderDropdown() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'GENDER',
+          style: GoogleFonts.inter(
+            fontSize: 10,
+            fontWeight: FontWeight.w600,
+            color: Colors.grey.shade500,
+            letterSpacing: 1.0,
+          ),
+        ),
+        const SizedBox(height: 6),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          decoration: BoxDecoration(
+            color: Colors.grey.shade50,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: Colors.grey.shade200),
+          ),
+          child: DropdownButtonHideUnderline(
+            child: DropdownButton<String>(
+              isExpanded: true,
+              hint: Text('Select your gender',
+                  style: GoogleFonts.inter(
+                      fontSize: 14, color: Colors.grey.shade400)),
+              value: _selectedGender,
+              icon: Icon(Icons.arrow_drop_down, color: Colors.grey.shade400),
+              dropdownColor: Colors.white,
+              items: ['Male', 'Female', 'Non-Binary', 'Prefer not to say']
+                  .map((String value) {
+                return DropdownMenuItem<String>(
+                  value: value,
+                  child: Text(value,
+                      style: GoogleFonts.inter(
+                          fontSize: 14, color: Colors.grey.shade900)),
+                );
+              }).toList(),
+              onChanged: (val) {
+                setState(() {
+                  _selectedGender = val;
+                });
+              },
             ),
           ),
         ),

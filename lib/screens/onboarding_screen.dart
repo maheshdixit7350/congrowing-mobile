@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import '../utils/app_colors.dart';
+import '../main.dart' show supabaseInitialized;
+import '../services/user_service.dart';
+import '../services/supabase_auth_service.dart';
 
 class OnboardingScreen extends StatefulWidget {
   const OnboardingScreen({super.key});
@@ -13,22 +15,76 @@ class OnboardingScreen extends StatefulWidget {
 class _OnboardingScreenState extends State<OnboardingScreen> {
   final _pageController = PageController();
   int _currentPage = 0;
+  bool _googleLoading = false;
+
+  void _signInWithGoogle() async {
+    if (!mounted) return;
+    setState(() => _googleLoading = true);
+
+    if (!supabaseInitialized) {
+      await Future.delayed(const Duration(milliseconds: 800));
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool('isLoggedIn', true);
+      await UserService.instance.loadCurrentUser();
+
+      if (mounted) {
+        setState(() => _googleLoading = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Running in Prototype Mode (Offline)',
+              style: GoogleFonts.inter(fontWeight: FontWeight.w600),
+            ),
+            backgroundColor: Colors.orange.shade700,
+            behavior: SnackBarBehavior.floating,
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          ),
+        );
+        Navigator.pushReplacementNamed(context, '/profile-setup');
+      }
+      return;
+    }
+
+    try {
+      await SupabaseAuthService.instance.signInWithGoogle();
+      if (mounted) {
+        setState(() => _googleLoading = false);
+      }
+    } catch (e) {
+      debugPrint('SUPABASE GOOGLE SIGNIN ERROR: $e');
+      if (mounted) {
+        setState(() => _googleLoading = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content:
+                Text('Google Sign-In failed: ${e.toString().split('\n')[0]}'),
+            backgroundColor: Colors.red,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    }
+  }
 
   static const _pages = [
     {
       'icon': Icons.people_rounded,
       'title': 'Connect with People',
-      'desc': 'Build meaningful connections with like-minded individuals who share your passion for growth.',
+      'desc':
+          'Build meaningful connections with like-minded individuals who share your passion for growth.',
     },
     {
       'icon': Icons.trending_up_rounded,
       'title': 'Track Your Growth',
-      'desc': 'Monitor your CRI score and climb the leaderboard as you grow personally and professionally.',
+      'desc':
+          'Monitor your CRI score and climb the leaderboard as you grow personally and professionally.',
     },
     {
       'icon': Icons.school_rounded,
       'title': 'Learn & Share',
-      'desc': 'Share your knowledge, learn from others, and grow together as a community.',
+      'desc':
+          'Share your knowledge, learn from others, and grow together as a community.',
     },
   ];
 
@@ -67,9 +123,9 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       body: Container(
         width: double.infinity,
         height: double.infinity,
-        decoration: BoxDecoration(
+        decoration: const BoxDecoration(
           gradient: LinearGradient(
-            colors: const [
+            colors: [
               Color(0xFF0F2F44),
               Color(0xFF1A4A6B),
               Color(0xFF2D6E4E),
@@ -175,10 +231,10 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                         );
                       }),
                     ),
-                    const SizedBox(height: 32),
-                    // Button
+                    const SizedBox(height: 24),
+                    // Google Sign-In Button
                     GestureDetector(
-                      onTap: _next,
+                      onTap: _googleLoading ? null : _signInWithGoogle,
                       child: Container(
                         width: double.infinity,
                         height: 56,
@@ -187,19 +243,71 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                           borderRadius: BorderRadius.circular(16),
                           boxShadow: [
                             BoxShadow(
-                              color: Colors.black.withAlpha(51),
-                              blurRadius: 20,
-                              offset: const Offset(0, 8),
+                              color: Colors.black.withAlpha(38),
+                              blurRadius: 16,
+                              offset: const Offset(0, 6),
                             ),
                           ],
                         ),
                         child: Center(
+                          child: _googleLoading
+                              ? const SizedBox(
+                                  width: 24,
+                                  height: 24,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2.5,
+                                    valueColor: AlwaysStoppedAnimation<Color>(
+                                        Color(0xFF0F2F44)),
+                                  ),
+                                )
+                              : Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Image.network(
+                                      'https://upload.wikimedia.org/wikipedia/commons/thumb/c/c1/Google_%22G%22_logo.svg/120px-Google_%22G%22_logo.svg.png',
+                                      width: 20,
+                                      height: 20,
+                                      errorBuilder: (c, e, s) => const Icon(
+                                          Icons.g_mobiledata,
+                                          size: 24,
+                                          color: Colors.blue),
+                                    ),
+                                    const SizedBox(width: 12),
+                                    Text(
+                                      'Continue with Google',
+                                      style: GoogleFonts.inter(
+                                        color: const Color(0xFF0F2F44),
+                                        fontWeight: FontWeight.w700,
+                                        fontSize: 16,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    // Next / Get Started button
+                    GestureDetector(
+                      onTap: _next,
+                      child: Container(
+                        width: double.infinity,
+                        height: 56,
+                        decoration: BoxDecoration(
+                          color: Colors.white.withAlpha(30),
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(
+                            color: Colors.white.withAlpha(51),
+                            width: 1.5,
+                          ),
+                        ),
+                        child: Center(
                           child: Text(
                             _currentPage == _pages.length - 1
-                                ? 'Get Started'
+                                ? 'Get Started (Email)'
                                 : 'Next',
                             style: GoogleFonts.inter(
-                              color: AppColors.loginPrimary,
+                              color: Colors.white,
                               fontWeight: FontWeight.w700,
                               fontSize: 16,
                             ),

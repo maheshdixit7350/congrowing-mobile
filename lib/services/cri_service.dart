@@ -1,6 +1,7 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart';
-import '../main.dart' show firebaseInitialized;
+import 'package:flutter/foundation.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+import '../main.dart' show supabaseInitialized;
+import 'supabase_auth_service.dart';
 
 /// A single review left by one user about another after a call.
 class UserReview {
@@ -29,41 +30,47 @@ class UserReview {
   });
 
   Map<String, dynamic> toJson() => {
-    'reviewerId': reviewerId,
-    'reviewedUserId': reviewedUserId,
-    'empathyScore': empathyScore,
-    'wasRespectful': wasRespectful,
-    'didListen': didListen,
+    'reviewer_id': reviewerId,
+    'reviewed_user_id': reviewedUserId,
+    'empathy_score': empathyScore,
+    'was_respectful': wasRespectful,
+    'did_listen': didListen,
     'note': note,
-    'callType': callType,
-    'callDurationSeconds': callDurationSeconds,
-    'createdAt': FieldValue.serverTimestamp(),
+    'call_type': callType,
+    'call_duration_seconds': callDurationSeconds,
+    'created_at': createdAt.toIso8601String(),
   };
 
-  factory UserReview.fromFirestore(DocumentSnapshot doc) {
-    final d = doc.data() as Map<String, dynamic>;
+  factory UserReview.fromJson(Map<String, dynamic> json) {
+    DateTime parsedDate;
+    final raw = json['created_at'] ?? json['createdAt'];
+    if (raw is String) {
+      parsedDate = DateTime.tryParse(raw) ?? DateTime.now();
+    } else {
+      parsedDate = DateTime.now();
+    }
+
     return UserReview(
-      id: doc.id,
-      reviewerId: d['reviewerId'] ?? '',
-      reviewedUserId: d['reviewedUserId'] ?? '',
-      empathyScore: (d['empathyScore'] as num?)?.toDouble() ?? 5.0,
-      wasRespectful: d['wasRespectful'] as bool? ?? false,
-      didListen: d['didListen'] as bool? ?? false,
-      note: d['note'] as String?,
-      callType: d['callType'] as String? ?? 'voice',
-      callDurationSeconds: d['callDurationSeconds'] as int? ?? 0,
-      createdAt: (d['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
+      id: (json['id'] ?? '').toString(),
+      reviewerId: (json['reviewer_id'] ?? json['reviewerId']) as String? ?? '',
+      reviewedUserId: (json['reviewed_user_id'] ?? json['reviewedUserId'] ?? json['reviewee_id']) as String? ?? '',
+      empathyScore: ((json['empathy_score'] ?? json['empathyScore'] ?? json['empathy']) as num?)?.toDouble() ?? 5.0,
+      wasRespectful: (json['was_respectful'] ?? json['wasRespectful'] ?? json['respect']) as bool? ?? false,
+      didListen: (json['did_listen'] ?? json['didListen']) as bool? ?? false,
+      note: (json['note'] ?? json['review_text']) as String?,
+      callType: (json['call_type'] ?? json['callType']) as String? ?? 'voice',
+      callDurationSeconds: (json['call_duration_seconds'] ?? json['callDurationSeconds']) as int? ?? 0,
+      createdAt: parsedDate,
     );
   }
 }
 
-/// Service to handle CRI (Character Rating Index) calculations.
+/// Service to handle CRI (Character Rating Index) calculations in Supabase.
 class CriService {
   CriService._();
   static final CriService instance = CriService._();
 
-  final FirebaseFirestore _db = FirebaseFirestore.instance;
-  String get _myUid => FirebaseAuth.instance.currentUser?.uid ?? '';
+  String get _myUid => supabaseInitialized ? (SupabaseAuthService.instance.currentUser?.id ?? '') : '';
 
   /// Submit a review about a user after a call.
   Future<void> submitReview({
@@ -75,7 +82,7 @@ class CriService {
     required String callType,
     required int callDurationSeconds,
   }) async {
-    if (!firebaseInitialized || _myUid.isEmpty) return;
+    if (!supabaseInitialized || _myUid.isEmpty) return;
 
     final review = UserReview(
       id: '',
@@ -91,41 +98,48 @@ class CriService {
     );
 
     // 1. Store the review
-    await _db.collection('reviews').add(review.toJson());
+    await Supabase.instance.client.from('reviews').insert(review.toJson());
 
     // 2. Update the reviewed user's aggregate CRI stats
     await _recalculateCRI(reviewedUserId);
 
     // 3. Track total calls for both users
-    await _db.collection('users').doc(_myUid).update({
-      'totalCalls': FieldValue.increment(1),
-      'totalCallDuration': FieldValue.increment(callDurationSeconds),
-    });
-    await _db.collection('users').doc(reviewedUserId).update({
-      'totalCalls': FieldValue.increment(1),
-      'totalCallDuration': FieldValue.increment(callDurationSeconds),
-    });
+    try {
+      final myUser = await Supabase.instance.client.from('users').select().eq('id', _myUid).maybeSingle();
+      if (myUser != null) {
+        final myCalls = (myUser['total_calls'] ?? myUser['totalCalls']) as int? ?? 0;
+        final myDuration = (myUser['total_call_duration'] ?? myUser['totalCallDuration']) as int? ?? 0;
+        await Supabase.instance.client.from('users').update({
+          'total_calls': myCalls + 1,
+          'total_call_duration': myDuration + callDurationSeconds,
+        }).eq('id', _myUid);
+      }
+
+      final reviewedUser = await Supabase.instance.client.from('users').select().eq('id', reviewedUserId).maybeSingle();
+      if (reviewedUser != null) {
+        final otherCalls = (reviewedUser['total_calls'] ?? reviewedUser['totalCalls']) as int? ?? 0;
+        final otherDuration = (reviewedUser['total_call_duration'] ?? reviewedUser['totalCallDuration']) as int? ?? 0;
+        await Supabase.instance.client.from('users').update({
+          'total_calls': otherCalls + 1,
+          'total_call_duration': otherDuration + callDurationSeconds,
+        }).eq('id', reviewedUserId);
+      }
+    } catch (_) {}
   }
 
   /// Recalculate CRI for a user based on all their reviews.
-  ///
-  /// CRI Formula (0-1000 scale):
-  /// - Empathy average (40% weight)  → max 400
-  /// - Respectfulness rate (30% weight) → max 300
-  /// - Listening rate (20% weight) → max 200
-  /// - Engagement bonus (10% weight) → max 100
   Future<void> _recalculateCRI(String userId) async {
     try {
-      final reviewsSnap = await _db
-          .collection('reviews')
-          .where('reviewedUserId', isEqualTo: userId)
-          .orderBy('createdAt', descending: true)
-          .limit(50) // Use last 50 reviews for fairness
-          .get();
+      final list = await Supabase.instance.client
+          .from('reviews')
+          .select()
+          .eq('reviewed_user_id', userId)
+          .order('created_at', ascending: false)
+          .limit(50);
 
-      if (reviewsSnap.docs.isEmpty) return;
+      if (list.isEmpty) return;
 
-      final reviews = reviewsSnap.docs.map(UserReview.fromFirestore).toList();
+      final reviews = list.map((map) => UserReview.fromJson(map)).toList();
       final count = reviews.length;
 
       // Empathy average (0-10) → scaled to 0-400
@@ -145,27 +159,29 @@ class CriService {
 
       final criScore = (empathyPart + respectPart + listenPart + engagementPart).round().clamp(0, 1000);
 
-      await _db.collection('users').doc(userId).update({
-        'criScore': criScore,
-        'totalReviews': count,
-        'avgEmpathy': double.parse(empathyAvg.toStringAsFixed(1)),
-        'respectRate': double.parse(((respectCount / count) * 100).toStringAsFixed(0)),
-        'listenRate': double.parse(((listenCount / count) * 100).toStringAsFixed(0)),
-      });
-    } catch (_) {
-      // Silently fail
+      await Supabase.instance.client.from('users').update({
+        'cri_score': criScore,
+        'total_reviews': count,
+        'avg_empathy': double.parse(empathyAvg.toStringAsFixed(1)),
+        'respect_rate': double.parse(((respectCount / count) * 100).toStringAsFixed(0)),
+        'listen_rate': double.parse(((listenCount / count) * 100).toStringAsFixed(0)),
+      }).eq('id', userId);
+    } catch (e) {
+      debugPrint('Error recalculating CRI on Supabase: $e');
     }
   }
 
   /// Get reviews for a specific user.
   Stream<List<UserReview>> getReviewsForUser(String userId) {
-    if (!firebaseInitialized) return const Stream.empty();
-    return _db
-        .collection('reviews')
-        .where('reviewedUserId', isEqualTo: userId)
-        .orderBy('createdAt', descending: true)
-        .limit(20)
-        .snapshots()
-        .map((s) => s.docs.map(UserReview.fromFirestore).toList());
+    if (!supabaseInitialized) return const Stream.empty();
+    return Supabase.instance.client
+        .from('reviews')
+        .stream(primaryKey: ['id'])
+        .eq('reviewed_user_id', userId)
+        .map((list) {
+          final mapped = list.map((map) => UserReview.fromJson(map)).toList();
+          mapped.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+          return mapped.take(20).toList();
+        });
   }
 }

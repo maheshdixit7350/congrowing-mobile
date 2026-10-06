@@ -1,207 +1,427 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
+import 'dart:async';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+import '../main.dart' show supabaseInitialized;
+import 'supabase_auth_service.dart';
 
-typedef void StreamStateCallback(MediaStream stream);
+typedef StreamStateCallback = void Function(MediaStream stream);
+typedef IncomingCallCallback = void Function(
+    String roomId, String callType, String callerId, String status);
 
 class Signaling {
   RTCPeerConnection? peerConnection;
   MediaStream? localStream;
   MediaStream? remoteStream;
   String? roomId;
-  String? currentRoomText;
+
   StreamStateCallback? onAddRemoteStream;
 
-  FirebaseFirestore db = FirebaseFirestore.instance;
+  final List<StreamSubscription> _activeSubs = [];
+
+  // Track whether remote description has been set so we can buffer ICE
+  bool _remoteDescriptionSet = false;
+  final List<RTCIceCandidate> _pendingCandidates = [];
 
   final Map<String, dynamic> configuration = {
     'iceServers': [
       {
         'urls': [
           'stun:stun1.l.google.com:19302',
-          'stun:stun2.l.google.com:19302'
+          'stun:stun2.l.google.com:19302',
+          'stun:stun3.l.google.com:19302',
         ]
-      }
+      },
+      {
+        'urls': 'stun:stun.relay.metered.ca:80',
+      },
+      {
+        'urls': 'turn:global.relay.metered.ca:80',
+        'username': 'e05c4a4a1347fef5fedaa1c5',
+        'credential': 'fCBVVCuN/6gVZrFj',
+      },
+      {
+        'urls': 'turn:global.relay.metered.ca:80?transport=tcp',
+        'username': 'e05c4a4a1347fef5fedaa1c5',
+        'credential': 'fCBVVCuN/6gVZrFj',
+      },
+      {
+        'urls': 'turn:global.relay.metered.ca:443',
+        'username': 'e05c4a4a1347fef5fedaa1c5',
+        'credential': 'fCBVVCuN/6gVZrFj',
+      },
+      {
+        'urls': 'turns:global.relay.metered.ca:443?transport=tcp',
+        'username': 'e05c4a4a1347fef5fedaa1c5',
+        'credential': 'fCBVVCuN/6gVZrFj',
+      },
     ]
   };
 
+  // ── Media ──────────────────────────────────────────────────────────────────
+
   Future<void> openUserMedia(
-      RTCVideoRenderer localVideo,
-      RTCVideoRenderer remoteVideo,
+      RTCVideoRenderer localVideo, RTCVideoRenderer remoteVideo,
       {bool isVideo = true}) async {
-    var stream = await navigator.mediaDevices
-        .getUserMedia({'video': isVideo, 'audio': true});
+    final stream = await navigator.mediaDevices.getUserMedia({
+      'video': isVideo
+          ? {
+              'facingMode': 'user',
+              'width': {'ideal': 1280},
+              'height': {'ideal': 720},
+            }
+          : false,
+      'audio': {
+        'echoCancellation': true,
+        'noiseSuppression': true,
+        'sampleRate': 44100,
+      },
+    });
 
     localVideo.srcObject = stream;
     localStream = stream;
-
-    // No need to create a dummy remote stream here.
-    // The remote stream will be assigned when the track event occurs.
   }
+
+  // ── Hang up ────────────────────────────────────────────────────────────────
 
   Future<void> hangUp(RTCVideoRenderer localVideo) async {
     try {
-      List<MediaStreamTrack> tracks = localVideo.srcObject?.getTracks() ?? [];
-      for (var track in tracks) {
+      for (final sub in _activeSubs) {
+        try {
+          sub.cancel();
+        } catch (_) {}
+      }
+      _activeSubs.clear();
+
+      final tracks = localVideo.srcObject?.getTracks() ?? [];
+      for (final track in tracks) {
         track.stop();
       }
-      
+
       localStream?.getTracks().forEach((track) => track.stop());
       remoteStream?.getTracks().forEach((track) => track.stop());
-      
+
       localStream?.dispose();
       remoteStream?.dispose();
-      
-      if (roomId != null) {
-        // Instead of immediate delete, maybe set status to ended
-        await db.collection('rooms').doc(roomId).update({'status': 'ended'});
-        // await db.collection('rooms').doc(roomId).delete();
+
+      if (roomId != null && supabaseInitialized) {
+        await Supabase.instance.client.from('rooms').update({
+          'status': 'ended',
+          'updated_at': DateTime.now().toIso8601String(),
+        }).eq('id', roomId!);
       }
     } catch (e) {
-      print("Error during hangup: $e");
+      debugPrint('Error during hangup: $e');
     } finally {
       peerConnection?.close();
       peerConnection = null;
       localStream = null;
       remoteStream = null;
+      roomId = null;
+      _remoteDescriptionSet = false;
+      _pendingCandidates.clear();
     }
   }
 
-  Future<String> createRoom(bool isVideo) async {
-    DocumentReference roomRef = db.collection('rooms').doc();
+  // ── Flush buffered ICE candidates ─────────────────────────────────────────
+
+  Future<void> _flushPendingCandidates() async {
+    for (final candidate in _pendingCandidates) {
+      try {
+        await peerConnection?.addCandidate(candidate);
+      } catch (e) {
+        debugPrint('Error adding buffered ICE candidate: $e');
+      }
+    }
+    _pendingCandidates.clear();
+  }
+
+  /// Adds a candidate, buffering it if remote description isn't set yet.
+  Future<void> _addIceCandidateSafe(RTCIceCandidate candidate) async {
+    if (_remoteDescriptionSet && peerConnection != null) {
+      try {
+        await peerConnection!.addCandidate(candidate);
+      } catch (e) {
+        debugPrint('Error adding ICE candidate: $e');
+      }
+    } else {
+      _pendingCandidates.add(candidate);
+    }
+  }
+
+  // ── Create Room (Caller) ───────────────────────────────────────────────────
+
+  /// Creates a WebRTC room targeting a specific [calleeUid].
+  /// If [calleeUid] is empty, falls back to random matchmaking mode.
+  Future<String> createRoom(bool isVideo, {String calleeUid = ''}) async {
+    if (!supabaseInitialized) return '';
+
+    _remoteDescriptionSet = false;
+    _pendingCandidates.clear();
+
+    final uid = SupabaseAuthService.instance.currentUser?.id;
+
+    final insertPayload = {
+      'type': isVideo ? 'video' : 'voice',
+      'status': calleeUid.isNotEmpty ? 'ringing' : 'waiting',
+      'caller_id': uid,
+      'created_at': DateTime.now().toIso8601String(),
+      'updated_at': DateTime.now().toIso8601String(),
+    };
+
+    if (calleeUid.isNotEmpty) {
+      insertPayload['callee_id'] = calleeUid;
+    }
+
+    final room = await Supabase.instance.client
+        .from('rooms')
+        .insert(insertPayload)
+        .select()
+        .single();
+
+    roomId = room['id'].toString();
     peerConnection = await createPeerConnection(configuration);
 
-    registerPeerConnectionListeners();
+    _registerPeerConnectionListeners();
 
     localStream?.getTracks().forEach((track) {
       peerConnection?.addTrack(track, localStream!);
     });
 
-    var callerCandidatesCollection = roomRef.collection('callerCandidates');
-    peerConnection?.onIceCandidate = (RTCIceCandidate candidate) {
-      callerCandidatesCollection.add(candidate.toMap());
+    peerConnection?.onIceCandidate = (RTCIceCandidate? candidate) async {
+      if (candidate == null || candidate.candidate == null) return;
+      try {
+        await Supabase.instance.client.from('caller_candidates').insert({
+          'room_id': roomId,
+          'candidate': candidate.candidate,
+          'sdpMid': candidate.sdpMid,
+          'sdpmid': candidate.sdpMid,
+          'sdpMLineIndex': candidate.sdpMLineIndex,
+          'sdpmlineindex': candidate.sdpMLineIndex,
+        });
+      } catch (e) {
+        debugPrint('Error sending caller ICE candidate: $e');
+      }
     };
 
-    RTCSessionDescription offer = await peerConnection!.createOffer();
+    final offer = await peerConnection!.createOffer();
     await peerConnection!.setLocalDescription(offer);
 
-    Map<String, dynamic> roomWithOffer = {
+    await Supabase.instance.client.from('rooms').update({
       'offer': offer.toMap(),
-      'type': isVideo ? 'video' : 'voice',
-      'status': 'waiting',
-      'createdAt': FieldValue.serverTimestamp(),
-    };
-    
-    await roomRef.set(roomWithOffer);
-    roomId = roomRef.id;
+      'updated_at': DateTime.now().toIso8601String(),
+    }).eq('id', roomId!);
 
-    roomRef.snapshots().listen((snapshot) async {
-      if (!snapshot.exists) return;
-      Map<String, dynamic> data = snapshot.data() as Map<String, dynamic>;
-      if (peerConnection?.getRemoteDescription() == null &&
-          data['answer'] != null) {
-        var answer = RTCSessionDescription(
-          data['answer']['sdp'],
-          data['answer']['type'],
-        );
-        await peerConnection?.setRemoteDescription(answer);
-      }
-    });
+    // Listen for SDP answer from callee
+    final answerSub = Supabase.instance.client
+        .from('rooms')
+        .stream(primaryKey: ['id'])
+        .eq('id', roomId!)
+        .listen((data) async {
+          if (data.isNotEmpty) {
+            final roomData = data.first;
+            if (!_remoteDescriptionSet && roomData['answer'] != null) {
+              final answerMap = Map<String, dynamic>.from(roomData['answer']);
+              final answer = RTCSessionDescription(
+                answerMap['sdp'],
+                answerMap['type'],
+              );
+              try {
+                await peerConnection?.setRemoteDescription(answer);
+                _remoteDescriptionSet = true;
+                await _flushPendingCandidates();
+              } catch (e) {
+                debugPrint('Error setting remote description: $e');
+              }
+            }
+          }
+        });
+    _activeSubs.add(answerSub);
 
-    roomRef.collection('calleeCandidates').snapshots().listen((snapshot) {
-      for (var change in snapshot.docChanges) {
-        if (change.type == DocumentChangeType.added) {
-          Map<String, dynamic> data = change.doc.data() as Map<String, dynamic>;
-          peerConnection!.addCandidate(
-            RTCIceCandidate(
-              data['candidate'],
-              data['sdpMid'],
-              data['sdpMLineIndex'],
-            ),
-          );
-        }
-      }
-    });
+    // Listen for ICE candidates from callee
+    final addedCalleeCandidates = <String>{};
+    final calleeCandidateSub = Supabase.instance.client
+        .from('callee_candidates')
+        .stream(primaryKey: ['id'])
+        .eq('room_id', roomId!)
+        .listen((snapshot) {
+          for (final candMap in snapshot) {
+            final candidateStr = candMap['candidate'] as String?;
+            if (candidateStr != null &&
+                !addedCalleeCandidates.contains(candidateStr)) {
+              addedCalleeCandidates.add(candidateStr);
+              final sdpMid = (candMap['sdpMid'] ?? candMap['sdpmid']) as String?;
+              final sdpMLineIndex = (candMap['sdpMLineIndex'] ?? candMap['sdpmlineindex']) as int?;
+              _addIceCandidateSafe(
+                RTCIceCandidate(
+                  candidateStr,
+                  sdpMid,
+                  sdpMLineIndex,
+                ),
+              );
+            }
+          }
+        });
+    _activeSubs.add(calleeCandidateSub);
 
     return roomId!;
   }
 
-  Future<void> joinRoom(String roomId) async {
-    this.roomId = roomId;
-    DocumentReference roomRef = db.collection('rooms').doc(roomId);
-    var roomSnapshot = await roomRef.get();
+  // ── Join Room (Callee) ─────────────────────────────────────────────────────
 
-    if (roomSnapshot.exists) {
-      peerConnection = await createPeerConnection(configuration);
-      registerPeerConnectionListeners();
+  Future<void> joinRoom(String joinRoomId) async {
+    if (!supabaseInitialized) return;
+    roomId = joinRoomId;
 
-      localStream?.getTracks().forEach((track) {
-        peerConnection?.addTrack(track, localStream!);
-      });
+    _remoteDescriptionSet = false;
+    _pendingCandidates.clear();
 
-      var calleeCandidatesCollection = roomRef.collection('calleeCandidates');
-      peerConnection?.onIceCandidate = (RTCIceCandidate? candidate) {
-        if (candidate == null) return;
-        calleeCandidatesCollection.add(candidate.toMap());
-      };
+    final roomData = await Supabase.instance.client
+        .from('rooms')
+        .select()
+        .eq('id', joinRoomId)
+        .maybeSingle();
+    if (roomData == null) return;
 
-      peerConnection?.onTrack = (RTCTrackEvent event) {
-        if (event.streams.isNotEmpty) {
-          remoteStream = event.streams[0];
-          if (onAddRemoteStream != null) {
-            onAddRemoteStream!(remoteStream!);
+    peerConnection = await createPeerConnection(configuration);
+    _registerPeerConnectionListeners();
+
+    localStream?.getTracks().forEach((track) {
+      peerConnection?.addTrack(track, localStream!);
+    });
+
+    peerConnection?.onIceCandidate = (RTCIceCandidate? candidate) async {
+      if (candidate == null || candidate.candidate == null) return;
+      try {
+        await Supabase.instance.client.from('callee_candidates').insert({
+          'room_id': joinRoomId,
+          'candidate': candidate.candidate,
+          'sdpMid': candidate.sdpMid,
+          'sdpmid': candidate.sdpMid,
+          'sdpMLineIndex': candidate.sdpMLineIndex,
+          'sdpmlineindex': candidate.sdpMLineIndex,
+        });
+      } catch (e) {
+        debugPrint('Error sending callee ICE candidate: $e');
+      }
+    };
+
+    // onTrack is already registered in _registerPeerConnectionListeners()
+
+    final offerMap = Map<String, dynamic>.from(roomData['offer']);
+    await peerConnection?.setRemoteDescription(
+      RTCSessionDescription(offerMap['sdp'], offerMap['type']),
+    );
+    _remoteDescriptionSet = true;
+    await _flushPendingCandidates();
+
+    final answer = await peerConnection!.createAnswer();
+    await peerConnection!.setLocalDescription(answer);
+
+    await Supabase.instance.client.from('rooms').update({
+      'answer': {'type': answer.type, 'sdp': answer.sdp},
+      'status': 'connected',
+      'updated_at': DateTime.now().toIso8601String(),
+    }).eq('id', joinRoomId);
+
+    // Listen for ICE candidates from caller
+    final addedCallerCandidates = <String>{};
+    final callerCandidateSub = Supabase.instance.client
+        .from('caller_candidates')
+        .stream(primaryKey: ['id'])
+        .eq('room_id', joinRoomId)
+        .listen((snapshot) {
+          for (final candMap in snapshot) {
+            final candidateStr = candMap['candidate'] as String?;
+            if (candidateStr != null &&
+                !addedCallerCandidates.contains(candidateStr)) {
+              addedCallerCandidates.add(candidateStr);
+              final sdpMid = (candMap['sdpMid'] ?? candMap['sdpmid']) as String?;
+              final sdpMLineIndex = (candMap['sdpMLineIndex'] ?? candMap['sdpmlineindex']) as int?;
+              _addIceCandidateSafe(
+                RTCIceCandidate(
+                  candidateStr,
+                  sdpMid,
+                  sdpMLineIndex,
+                ),
+              );
+            }
           }
-        }
-      };
-
-      var data = roomSnapshot.data() as Map<String, dynamic>;
-      var offer = data['offer'];
-      await peerConnection?.setRemoteDescription(
-        RTCSessionDescription(offer['sdp'], offer['type']),
-      );
-
-      var answer = await peerConnection!.createAnswer();
-      await peerConnection!.setLocalDescription(answer);
-
-      Map<String, dynamic> roomWithAnswer = {
-        'answer': {'type': answer.type, 'sdp': answer.sdp}
-      };
-
-      await roomRef.update(roomWithAnswer);
-
-      roomRef.collection('callerCandidates').snapshots().listen((snapshot) {
-        for (var document in snapshot.docChanges) {
-          if (document.type == DocumentChangeType.added) {
-            var data = document.doc.data() as Map<String, dynamic>;
-            peerConnection!.addCandidate(
-              RTCIceCandidate(
-                data['candidate'],
-                data['sdpMid'],
-                data['sdpMLineIndex'],
-              ),
-            );
-          }
-        }
-      });
-    }
+        });
+    _activeSubs.add(callerCandidateSub);
   }
 
-  void registerPeerConnectionListeners() {
+  // ── Incoming Call Listener ────────────────────────────────────────────────
+
+  /// Listens for incoming calls where [myUid] is the callee.
+  /// Calls [onIncomingCall] with (roomId, callType, callerId) when found.
+  /// Returns the subscription so callers can cancel it.
+  StreamSubscription listenForIncomingCall(
+      String myUid, IncomingCallCallback onIncomingCall) {
+    final sub = Supabase.instance.client
+        .from('rooms')
+        .stream(primaryKey: ['id'])
+        .eq('callee_id', myUid)
+        .listen((data) {
+          for (final row in data) {
+            final status = row['status'] as String? ?? '';
+            final rid = row['id'].toString();
+            final callType = row['type'] as String? ?? 'video';
+            final callerId = row['caller_id'] as String? ?? '';
+            onIncomingCall(rid, callType, callerId, status);
+          }
+        });
+    return sub;
+  }
+
+  /// Listen for room updates (e.g. status changes like 'ended')
+  StreamSubscription listenToRoomStatus(
+      String targetRoomId, void Function(String status) onStatusChanged) {
+    return Supabase.instance.client
+        .from('rooms')
+        .stream(primaryKey: ['id'])
+        .eq('id', targetRoomId)
+        .listen((snapshot) {
+          if (snapshot.isNotEmpty) {
+            final status = snapshot.first['status'] as String? ?? '';
+            onStatusChanged(status);
+          }
+        });
+  }
+
+  // ── Peer Connection Listeners ─────────────────────────────────────────────
+
+  void _registerPeerConnectionListeners() {
     peerConnection?.onIceGatheringState = (RTCIceGatheringState state) {
-      print('ICE gathering state changed: $state');
+      debugPrint('ICE gathering state: $state');
     };
     peerConnection?.onConnectionState = (RTCPeerConnectionState state) {
-      print('Connection state changed: $state');
+      debugPrint('Peer connection state: $state');
     };
     peerConnection?.onSignalingState = (RTCSignalingState state) {
-      print('Signaling state changed: $state');
+      debugPrint('Signaling state: $state');
     };
-    peerConnection?.onTrack = (RTCTrackEvent event) {
+    peerConnection?.onIceConnectionState = (RTCIceConnectionState state) {
+      debugPrint('ICE connection state: $state');
+    };
+    peerConnection?.onTrack = (RTCTrackEvent event) async {
       if (event.streams.isNotEmpty) {
         remoteStream = event.streams[0];
-        if (onAddRemoteStream != null) {
-          onAddRemoteStream!(remoteStream!);
+        onAddRemoteStream?.call(remoteStream!);
+      } else {
+        remoteStream ??= await createLocalMediaStream('remote_stream');
+        remoteStream?.addTrack(event.track);
+        if (remoteStream != null) {
+          onAddRemoteStream?.call(remoteStream!);
         }
       }
     };
+    peerConnection?.onAddStream = (MediaStream stream) {
+      remoteStream = stream;
+      onAddRemoteStream?.call(remoteStream!);
+    };
   }
+
+  // Keep backward compat
+  void registerPeerConnectionListeners() => _registerPeerConnectionListeners();
 }

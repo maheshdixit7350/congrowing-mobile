@@ -31,3 +31,9 @@
 # Final fix for R8 errors
 -ignorewarnings
 -keep class com.google.android.play.core.** { *; }
+
+# Firebase and gRPC safeguards
+-keep class com.google.firebase.** { *; }
+-keep class io.grpc.** { *; }
+-keep class com.google.auth.** { *; }
+-keep class io.perfmark.** { *; }

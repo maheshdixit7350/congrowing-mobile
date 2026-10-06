@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../utils/app_colors.dart';
+import '../services/user_service.dart';
 
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
@@ -45,7 +46,14 @@ class _SplashScreenState extends State<SplashScreen>
 
     if (!mounted) return;
     if (isLoggedIn) {
-      Navigator.pushReplacementNamed(context, '/home');
+      // Check if user has completed profile setup
+      final onboardingDone = await UserService.instance.isOnboardingComplete();
+      if (!mounted) return;
+      if (onboardingDone) {
+        Navigator.pushReplacementNamed(context, '/home');
+      } else {
+        Navigator.pushReplacementNamed(context, '/profile-setup');
+      }
     } else if (hasSeenOnboarding) {
       Navigator.pushReplacementNamed(context, '/login');
     } else {
@@ -65,9 +73,9 @@ class _SplashScreenState extends State<SplashScreen>
       body: Container(
         width: double.infinity,
         height: double.infinity,
-        decoration: BoxDecoration(
+        decoration: const BoxDecoration(
           gradient: LinearGradient(
-            colors: const [
+            colors: [
               Color(0xFF0F2F44),
               Color(0xFF1A4A6B),
               Color(0xFF2D6E4E),
@@ -107,21 +115,21 @@ class _SplashScreenState extends State<SplashScreen>
                         child: Image.asset(
                           'assets/images/logo.png',
                           fit: BoxFit.cover,
-                        errorBuilder: (c, e, s) => Container(
-                          decoration: BoxDecoration(
-                            gradient: AppColors.primaryGradient,
-                            borderRadius: BorderRadius.circular(28),
-                          ),
-                          child: const Center(
-                            child: Text(
-                              'CG',
-                              style: TextStyle(
-                                color: Colors.white,
-                                fontSize: 42,
-                                fontWeight: FontWeight.w900,
+                          errorBuilder: (c, e, s) => Container(
+                            decoration: BoxDecoration(
+                              gradient: AppColors.primaryGradient,
+                              borderRadius: BorderRadius.circular(28),
+                            ),
+                            child: const Center(
+                              child: Text(
+                                'CG',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 42,
+                                  fontWeight: FontWeight.w900,
+                                ),
                               ),
                             ),
-                          ),
                           ),
                         ),
                       ),
