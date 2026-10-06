@@ -353,8 +353,8 @@ class UserService {
       }).eq('id', uid);
 
       if (online) {
-        // Active heartbeat ping every 2 seconds for ultra-responsive live status
-        _heartbeatTimer = Timer.periodic(const Duration(seconds: 2), (_) async {
+        // Active heartbeat ping every 1.5 seconds for instant sub-second status sync
+        _heartbeatTimer = Timer.periodic(const Duration(milliseconds: 1500), (_) async {
           final curUid = _currentUserId;
           if (curUid != null && supabaseInitialized) {
             try {
@@ -579,7 +579,7 @@ class UserService {
   }
 
 
-  /// Check if a user row has sent an active heartbeat within 45 seconds in UTC.
+  /// Check if a user row has sent an active heartbeat within 4 seconds in UTC.
   bool _isUserRecentlyActive(Map<String, dynamic> row) {
     final isOnline = row['is_online'] as bool? ?? false;
     if (!isOnline) return false;
@@ -594,7 +594,7 @@ class UserService {
       final lastSeen = DateTime.parse(lastSeenStr).toUtc();
       final nowUtc = DateTime.now().toUtc();
       final diffSeconds = nowUtc.difference(lastSeen).inSeconds.abs();
-      return diffSeconds <= 45;
+      return diffSeconds <= 4;
     } catch (_) {
       return false;
     }
@@ -644,7 +644,7 @@ class UserService {
     return controller.stream;
   }
 
-  /// Helper to query active users with fresh heartbeats (within 6 seconds).
+  /// Helper to query active users with fresh heartbeats (within 4 seconds).
   Future<int> _fetchActiveOnlineCount() async {
     final uid = _currentUserId;
     try {
@@ -662,7 +662,7 @@ class UserService {
         try {
           final lastSeen = DateTime.parse(lastSeenStr).toUtc();
           final diff = now.difference(lastSeen).inSeconds.abs();
-          return diff <= 6;
+          return diff <= 4;
         } catch (_) {
           return false;
         }
