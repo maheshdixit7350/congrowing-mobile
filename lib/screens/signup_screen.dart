@@ -200,14 +200,14 @@ class _SignupScreenState extends State<SignupScreen>
       );
 
       if (user != null) {
-        // Auto-login: load user then go to home.
-        // Navigation is driven by the authStateChanges listener in main.dart.
         final prefs = await SharedPreferences.getInstance();
         await prefs.setBool('isLoggedIn', true);
         await UserService.instance.loadCurrentUser();
         await UserService.instance.setOnlineStatus(true);
+        final onboardingDone = await UserService.instance.isOnboardingComplete();
 
         if (mounted) {
+          setState(() => _loading = false);
           ScaffoldMessenger.of(context).showSnackBar(SnackBar(
             content: Text('Welcome to ConGrowing, $name!',
                 style: GoogleFonts.inter(fontWeight: FontWeight.w600)),
@@ -216,16 +216,27 @@ class _SignupScreenState extends State<SignupScreen>
             shape:
                 RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
           ));
+          if (onboardingDone) {
+            Navigator.pushNamedAndRemoveUntil(context, '/home', (_) => false);
+          } else {
+            Navigator.pushNamedAndRemoveUntil(context, '/profile-setup', (_) => false);
+          }
         }
       }
     } catch (e) {
-      setState(() {
-        _errorMessage = e.toString().contains('User already exists')
-            ? 'The account already exists for that email.'
-            : 'An error occurred: ${e.toString().split('\n')[0]}';
-        _loading = false;
-      });
+      final err = e.toString();
+      String msg = 'An error occurred: ${err.split('\n')[0]}';
+      if (err.contains('User already registered') || err.contains('User already exists')) {
+        msg = 'The account already exists for that email. Please sign in instead.';
+      }
+      if (mounted) {
+        setState(() {
+          _errorMessage = msg;
+          _loading = false;
+        });
+      }
     }
+
   }
 
   // ── Google Sign-In ──────────────────────────────────────────────────────

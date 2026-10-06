@@ -170,10 +170,7 @@ class _LoginScreenState extends State<LoginScreen>
     if (!mounted) return;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool('isLoggedIn', true);
-    // Navigation is handled by the global authStateChanges listener in main.dart.
-    // Doing it here too causes a double-navigation race condition (SH-1 bug).
-    // For non-Supabase (prototype) mode, navigate manually since there is no
-    // auth state listener.
+
     if (!supabaseInitialized) {
       await UserService.instance.loadCurrentUser();
       final onboardingDone = await UserService.instance.isOnboardingComplete();
@@ -184,9 +181,22 @@ class _LoginScreenState extends State<LoginScreen>
           Navigator.pushReplacementNamed(context, '/profile-setup');
         }
       }
+      return;
     }
-    if (mounted) setState(() => _loading = false);
+
+    await UserService.instance.loadCurrentUser();
+    await UserService.instance.setOnlineStatus(true);
+    final onboardingDone = await UserService.instance.isOnboardingComplete();
+    if (mounted) {
+      setState(() => _loading = false);
+      if (onboardingDone) {
+        Navigator.pushNamedAndRemoveUntil(context, '/home', (_) => false);
+      } else {
+        Navigator.pushNamedAndRemoveUntil(context, '/profile-setup', (_) => false);
+      }
+    }
   }
+
 
   @override
   Widget build(BuildContext context) {
