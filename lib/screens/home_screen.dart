@@ -482,6 +482,66 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  Widget _buildLiveOnlineBadge(bool isDark) {
+    return StreamBuilder<int>(
+      stream: UserService.instance.streamOnlineCount(),
+      initialData: 1,
+      builder: (context, snapshot) {
+        final count = snapshot.data ?? 1;
+        return Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+          decoration: BoxDecoration(
+            color: isDark
+                ? const Color(0xFF1E293B).withOpacity(0.8)
+                : const Color(0xFFE2E8F0).withOpacity(0.9),
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(
+              color: const Color(0xFF10B981).withOpacity(0.4),
+              width: 1,
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: const Color(0xFF10B981).withOpacity(0.15),
+                blurRadius: 8,
+                offset: const Offset(0, 2),
+              ),
+            ],
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 8,
+                height: 8,
+                decoration: const BoxDecoration(
+                  color: Color(0xFF10B981),
+                  shape: BoxShape.circle,
+                  boxShadow: [
+                    BoxShadow(
+                      color: Color(0xFF10B981),
+                      blurRadius: 6,
+                      spreadRadius: 1.5,
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 6),
+              Text(
+                '$count Online',
+                style: GoogleFonts.inter(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w700,
+                  color: isDark ? const Color(0xFF34D399) : const Color(0xFF059669),
+                  letterSpacing: 0.2,
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
@@ -515,15 +575,15 @@ class _HomeScreenState extends State<HomeScreen> {
                             padding: const EdgeInsets.all(2),
                             child: Image.asset(
                               'assets/images/logo.png',
-                              width: 32,
-                              height: 32,
+                              width: 30,
+                              height: 30,
                               fit: BoxFit.cover,
                               errorBuilder: (c, e, s) =>
-                                  const SizedBox(width: 32, height: 32),
+                                  const SizedBox(width: 30, height: 30),
                             ),
                           ),
                         ),
-                        const SizedBox(width: 10),
+                        const SizedBox(width: 8),
                         ShaderMask(
                           shaderCallback: (bounds) =>
                               AppColors.primaryGradient.createShader(bounds),
@@ -531,13 +591,16 @@ class _HomeScreenState extends State<HomeScreen> {
                             'ConGrowing',
                             style: GoogleFonts.inter(
                               fontWeight: FontWeight.w700,
-                              fontSize: 20,
+                              fontSize: 18,
                               color: Colors.white,
                             ),
                           ),
                         ),
+                        const SizedBox(width: 8),
+                        _buildLiveOnlineBadge(isDark),
                       ],
                     ),
+
                     actions: [
                       IconButton(
                         icon: const Icon(Icons.add_box_outlined),

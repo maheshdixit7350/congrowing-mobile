@@ -564,6 +564,20 @@ class UserService {
             .toList());
   }
 
+  /// Stream total online users count in real-time.
+  /// Guarantees a minimum default count of 1 when active.
+  Stream<int> streamOnlineCount() {
+    if (!supabaseInitialized) return Stream.value(1);
+    return Supabase.instance.client
+        .from('users')
+        .stream(primaryKey: ['id'])
+        .map((rows) {
+          final onlineCount = rows.where((r) => r['is_online'] == true).length;
+          return onlineCount > 0 ? onlineCount : 1;
+        });
+  }
+
+
   /// Check if a target user is following the current user.
   Future<bool> isFollowedBy(String targetUid) async {
     if (!supabaseInitialized || _currentUserId == null) return false;
