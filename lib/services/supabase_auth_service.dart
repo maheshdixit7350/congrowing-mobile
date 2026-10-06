@@ -8,9 +8,10 @@ class SupabaseAuthService {
 
   final SupabaseClient _client = Supabase.instance.client;
 
-  /// The Web Client ID from google-services.json (client_type: 3).
+  /// The Web Client ID from Google Cloud Console.
   static const String _webClientId =
-      '308682750622-g0gs8hg3j5gq26gi32hi2qf463399rqh.apps.googleusercontent.com';
+      '612128388176-p44fj4noba1f4g61urb9vgivofptvlr1.apps.googleusercontent.com';
+
 
   final GoogleSignIn _googleSignIn = GoogleSignIn(
     clientId: kIsWeb ? _webClientId : null,
