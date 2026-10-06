@@ -16,7 +16,9 @@ class UserService {
 
   UserModel? _currentUser;
   StreamSubscription<List<Map<String, dynamic>>>? _userSub;
+  Timer? _heartbeatTimer;
   void Function(UserModel?)? _localListener;
+
 
   UserModel? get currentUser => _currentUser;
 
@@ -334,21 +336,41 @@ class UserService {
     return false;
   }
 
-  /// Set user online status.
+  /// Set user online status and manage heartbeat timer.
   Future<void> setOnlineStatus(bool online) async {
     if (!supabaseInitialized) return;
     final uid = _currentUserId;
     if (uid == null) return;
+
+    _heartbeatTimer?.cancel();
+    _heartbeatTimer = null;
+
     try {
-      final updateData = <String, dynamic>{'is_online': online};
-      if (!online) {
-        updateData['last_seen'] = DateTime.now().toIso8601String();
+      final now = DateTime.now().toIso8601String();
+      await Supabase.instance.client.from('users').update({
+        'is_online': online,
+        'last_seen': now,
+      }).eq('id', uid);
+
+      if (online) {
+        // Heartbeat timer every 35 seconds to keep last_seen fresh
+        _heartbeatTimer = Timer.periodic(const Duration(seconds: 35), (_) async {
+          final curUid = _currentUserId;
+          if (curUid != null && supabaseInitialized) {
+            try {
+              await Supabase.instance.client.from('users').update({
+                'is_online': true,
+                'last_seen': DateTime.now().toIso8601String(),
+              }).eq('id', curUid);
+            } catch (_) {}
+          }
+        });
       }
-      await Supabase.instance.client.from('users').update(updateData).eq('id', uid);
     } catch (e) {
-      // Ignore if document not found
+      debugPrint('Error setting online status: $e');
     }
   }
+
 
   /// Stream a specific user's online status and last seen in real-time.
   Stream<Map<String, dynamic>> streamUserOnlineStatus(String uid) {
@@ -550,6 +572,23 @@ class UserService {
     }
   }
 
+  /// Check if a user row has sent a heartbeat recently (within 120 seconds).
+  bool _isUserRecentlyActive(Map<String, dynamic> row) {
+    final isOnline = row['is_online'] as bool? ?? false;
+    if (!isOnline) return false;
+
+    final lastSeenStr = row['last_seen'] as String?;
+    if (lastSeenStr == null || lastSeenStr.isEmpty) return false;
+
+    try {
+      final lastSeen = DateTime.parse(lastSeenStr);
+      final diffSeconds = DateTime.now().difference(lastSeen).inSeconds.abs();
+      return diffSeconds <= 120;
+    } catch (_) {
+      return false;
+    }
+  }
+
   /// Stream online users in real-time.
   Stream<List<UserModel>> streamOnlineUsers({int limit = 30}) {
     if (!supabaseInitialized) return Stream.value([]);
@@ -558,24 +597,27 @@ class UserService {
         .from('users')
         .stream(primaryKey: ['id'])
         .map((rows) => rows
-            .where((r) => r['is_online'] == true && r['id'] != uid)
+            .where((r) => r['id'] != uid && _isUserRecentlyActive(r))
             .take(limit)
             .map((r) => UserModel.fromJson(r))
             .toList());
   }
 
   /// Stream total online users count in real-time.
-  /// Guarantees a minimum default count of 1 when active.
+  /// Counts only users with recent active heartbeats.
   Stream<int> streamOnlineCount() {
     if (!supabaseInitialized) return Stream.value(1);
+    final uid = _currentUserId;
     return Supabase.instance.client
         .from('users')
         .stream(primaryKey: ['id'])
         .map((rows) {
-          final onlineCount = rows.where((r) => r['is_online'] == true).length;
-          return onlineCount > 0 ? onlineCount : 1;
+          final activeOthers = rows.where((r) => r['id'] != uid && _isUserRecentlyActive(r)).length;
+          final totalCount = (uid != null ? 1 : 0) + activeOthers;
+          return totalCount > 0 ? totalCount : 1;
         });
   }
+
 
 
   /// Check if a target user is following the current user.
@@ -595,6 +637,8 @@ class UserService {
   }
 
   void dispose() {
+    _heartbeatTimer?.cancel();
     _userSub?.cancel();
   }
+
 }
