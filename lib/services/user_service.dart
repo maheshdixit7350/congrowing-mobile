@@ -353,8 +353,8 @@ class UserService {
       }).eq('id', uid);
 
       if (online) {
-        // Heartbeat timer every 30 seconds to keep last_seen fresh
-        _heartbeatTimer = Timer.periodic(const Duration(seconds: 30), (_) async {
+        // Active heartbeat ping every 10 seconds to maintain sub-second runtime status
+        _heartbeatTimer = Timer.periodic(const Duration(seconds: 10), (_) async {
           final curUid = _currentUserId;
           if (curUid != null && supabaseInitialized) {
             try {
@@ -366,6 +366,7 @@ class UserService {
           }
         });
       }
+
     } catch (e) {
       debugPrint('Error setting online status: $e');
     }
@@ -573,26 +574,27 @@ class UserService {
     }
   }
 
-  /// Check if a user row has sent a heartbeat recently (within 180 seconds in UTC).
+  /// Check if a user row has sent an active heartbeat within 45 seconds in UTC.
   bool _isUserRecentlyActive(Map<String, dynamic> row) {
     final isOnline = row['is_online'] as bool? ?? false;
     if (!isOnline) return false;
 
     final lastSeenStr = row['last_seen'] as String?;
     if (lastSeenStr == null || lastSeenStr.isEmpty) {
-      // If is_online is true, treat as online
-      return true;
+      // Stale rows without recent timestamp are NOT active
+      return false;
     }
 
     try {
       final lastSeen = DateTime.parse(lastSeenStr).toUtc();
       final nowUtc = DateTime.now().toUtc();
       final diffSeconds = nowUtc.difference(lastSeen).inSeconds.abs();
-      return diffSeconds <= 180;
+      return diffSeconds <= 45;
     } catch (_) {
-      return true;
+      return false;
     }
   }
+
 
 
   /// Stream online users in real-time.
