@@ -1,4 +1,4 @@
-name: Flutter CI/CD & GitHub Pages Deploy
+name: Fast Flutter Web Deploy
 
 on:
   push:
@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
   pages: write
   id-token: write
 
@@ -15,9 +15,12 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build_and_test:
-    name: Test & Build Flutter App
+  deploy_web:
+    name: Build & Deploy Flutter Web
     runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
 
     steps:
       - name: Checkout Repository
@@ -38,9 +41,6 @@ jobs:
       - name: Install Dependencies
         run: flutter pub get
 
-      - name: Analyze Project
-        run: flutter analyze || true
-
       - name: Build Web App
         run: flutter build web --release --base-href "/congrowing-mobile/"
 
@@ -49,24 +49,6 @@ jobs:
         with:
           path: 'build/web'
 
-      - name: Build Android APK
-        run: flutter build apk --release || true
-
-      - name: Upload APK Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: app-release-apk
-          path: build/app/outputs/flutter-apk/app-release.apk
-
-  deploy_web:
-    name: Deploy Web App to GitHub Pages
-    needs: build_and_test
-    if: github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
