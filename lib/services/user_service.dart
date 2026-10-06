@@ -6,7 +6,6 @@ import '../models/user_model.dart';
 import '../main.dart' show supabaseInitialized;
 import 'supabase_auth_service.dart';
 import 'notification_service.dart';
-import 'presence_service.dart';
 
 /// Singleton service that manages the current user's data from Supabase.
 class UserService {
