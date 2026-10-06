@@ -91,9 +91,11 @@ class _VideoCallScreenState extends State<VideoCallScreen>
       await _localRenderer.initialize();
       await _remoteRenderer.initialize();
 
-      signaling.onAddRemoteStream = (stream) {
+      signaling.onAddRemoteStream = (stream) async {
         _remoteRenderer.srcObject = stream;
-        _audioPlayer.stop();
+        try {
+          await _audioPlayer.stop();
+        } catch (_) {}
 
         try {
           Helper.setSpeakerphoneOn(true);

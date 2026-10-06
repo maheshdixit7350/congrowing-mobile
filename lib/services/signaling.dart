@@ -215,8 +215,8 @@ class Signaling {
         await Supabase.instance.client.from('caller_candidates').insert({
           'room_id': roomId,
           'candidate': candidate.candidate,
-          'sdpmid': candidate.sdpMid,
-          'sdpmlineindex': candidate.sdpMLineIndex,
+          'sdpmid': candidate.sdpMid ?? '0',
+          'sdpmlineindex': candidate.sdpMLineIndex ?? 0,
         });
       } catch (e) {
         debugPrint('Error sending caller ICE candidate: $e');
@@ -347,8 +347,8 @@ class Signaling {
         await Supabase.instance.client.from('callee_candidates').insert({
           'room_id': joinRoomId,
           'candidate': candidate.candidate,
-          'sdpmid': candidate.sdpMid,
-          'sdpmlineindex': candidate.sdpMLineIndex,
+          'sdpmid': candidate.sdpMid ?? '0',
+          'sdpmlineindex': candidate.sdpMLineIndex ?? 0,
         });
       } catch (e) {
         debugPrint('Error sending callee ICE candidate: $e');

@@ -37,7 +37,7 @@ class _VoiceCallScreenState extends State<VoiceCallScreen>
 
   bool _connecting = true;
   bool _audioMuted = false;
-  bool _speakerOn = false;
+  bool _speakerOn = true;
   bool _initialized = false;
   String? _errorMsg;
 
@@ -96,9 +96,11 @@ class _VoiceCallScreenState extends State<VoiceCallScreen>
       await _localRenderer.initialize();
       await _remoteRenderer.initialize();
 
-      signaling.onAddRemoteStream = (stream) {
+      signaling.onAddRemoteStream = (stream) async {
         _remoteRenderer.srcObject = stream;
-        _audioPlayer.stop();
+        try {
+          await _audioPlayer.stop();
+        } catch (_) {}
 
         try {
           Helper.setSpeakerphoneOn(true);
