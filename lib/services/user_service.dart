@@ -336,7 +336,7 @@ class UserService {
     return false;
   }
 
-  /// Set user online status and manage heartbeat timer.
+  /// Set user online status and manage heartbeat timer using UTC.
   Future<void> setOnlineStatus(bool online) async {
     if (!supabaseInitialized) return;
     final uid = _currentUserId;
@@ -346,21 +346,21 @@ class UserService {
     _heartbeatTimer = null;
 
     try {
-      final now = DateTime.now().toIso8601String();
+      final nowUtc = DateTime.now().toUtc().toIso8601String();
       await Supabase.instance.client.from('users').update({
         'is_online': online,
-        'last_seen': now,
+        'last_seen': nowUtc,
       }).eq('id', uid);
 
       if (online) {
-        // Heartbeat timer every 35 seconds to keep last_seen fresh
-        _heartbeatTimer = Timer.periodic(const Duration(seconds: 35), (_) async {
+        // Heartbeat timer every 30 seconds to keep last_seen fresh
+        _heartbeatTimer = Timer.periodic(const Duration(seconds: 30), (_) async {
           final curUid = _currentUserId;
           if (curUid != null && supabaseInitialized) {
             try {
               await Supabase.instance.client.from('users').update({
                 'is_online': true,
-                'last_seen': DateTime.now().toIso8601String(),
+                'last_seen': DateTime.now().toUtc().toIso8601String(),
               }).eq('id', curUid);
             } catch (_) {}
           }
@@ -370,6 +370,7 @@ class UserService {
       debugPrint('Error setting online status: $e');
     }
   }
+
 
 
   /// Stream a specific user's online status and last seen in real-time.
@@ -572,22 +573,27 @@ class UserService {
     }
   }
 
-  /// Check if a user row has sent a heartbeat recently (within 120 seconds).
+  /// Check if a user row has sent a heartbeat recently (within 180 seconds in UTC).
   bool _isUserRecentlyActive(Map<String, dynamic> row) {
     final isOnline = row['is_online'] as bool? ?? false;
     if (!isOnline) return false;
 
     final lastSeenStr = row['last_seen'] as String?;
-    if (lastSeenStr == null || lastSeenStr.isEmpty) return false;
+    if (lastSeenStr == null || lastSeenStr.isEmpty) {
+      // If is_online is true, treat as online
+      return true;
+    }
 
     try {
-      final lastSeen = DateTime.parse(lastSeenStr);
-      final diffSeconds = DateTime.now().difference(lastSeen).inSeconds.abs();
-      return diffSeconds <= 120;
+      final lastSeen = DateTime.parse(lastSeenStr).toUtc();
+      final nowUtc = DateTime.now().toUtc();
+      final diffSeconds = nowUtc.difference(lastSeen).inSeconds.abs();
+      return diffSeconds <= 180;
     } catch (_) {
-      return false;
+      return true;
     }
   }
+
 
   /// Stream online users in real-time.
   Stream<List<UserModel>> streamOnlineUsers({int limit = 30}) {

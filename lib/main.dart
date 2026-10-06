@@ -151,11 +151,13 @@ class _ConGrowingAppState extends State<ConGrowingApp>
         }
       });
 
-      // If already logged in, start the listener immediately
+      // If already logged in, start listener and set online status immediately
       final currentUid = SupabaseAuthService.instance.currentUser?.id;
       if (currentUid != null) {
         _startIncomingCallListener(currentUid);
+        UserService.instance.setOnlineStatus(true);
       }
+
     }
   }
 
