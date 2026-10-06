@@ -62,10 +62,18 @@ class SupabaseAuthService {
     }
   }
 
-  /// Sign in with Google using native Google Sign-In + Supabase ID token.
-  /// Returns the authenticated user or null if cancelled.
+  /// Sign in with Google using Supabase OAuth on Web and native Google Sign-In on Mobile.
   Future<User?> signInWithGoogle() async {
     try {
+      if (kIsWeb) {
+        final redirectUrl = Uri.base.origin + Uri.base.path;
+        await _client.auth.signInWithOAuth(
+          OAuthProvider.google,
+          redirectTo: redirectUrl,
+        );
+        return _client.auth.currentUser;
+      }
+
       final googleUser = await _googleSignIn.signIn();
       if (googleUser == null) {
         // User cancelled the sign-in flow
@@ -87,6 +95,7 @@ class SupabaseAuthService {
       );
 
       final user = response.user;
+
       if (user != null) {
         final photoUrl = googleUser.photoUrl;
         if (photoUrl != null && photoUrl.isNotEmpty) {
