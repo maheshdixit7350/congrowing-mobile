@@ -266,8 +266,12 @@ class _VoiceCallScreenState extends State<VoiceCallScreen>
             ),
           ),
 
-          // Hidden renderer for audio routing
-          Offstage(child: RTCVideoView(_remoteRenderer)),
+          // Active media renderer for audio routing
+          SizedBox(
+            width: 1,
+            height: 1,
+            child: RTCVideoView(_remoteRenderer),
+          ),
         ],
       ),
     );

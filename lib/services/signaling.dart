@@ -63,23 +63,32 @@ class Signaling {
   Future<void> openUserMedia(
       RTCVideoRenderer localVideo, RTCVideoRenderer remoteVideo,
       {bool isVideo = true}) async {
-    final stream = await navigator.mediaDevices.getUserMedia({
-      'video': isVideo
-          ? {
-              'facingMode': 'user',
-              'width': {'ideal': 1280},
-              'height': {'ideal': 720},
-            }
-          : false,
-      'audio': {
-        'echoCancellation': true,
-        'noiseSuppression': true,
-        'sampleRate': 44100,
-      },
-    });
+    try {
+      final stream = await navigator.mediaDevices.getUserMedia({
+        'video': isVideo
+            ? {
+                'facingMode': 'user',
+                'width': {'ideal': 1280},
+                'height': {'ideal': 720},
+              }
+            : false,
+        'audio': {
+          'echoCancellation': true,
+          'noiseSuppression': true,
+          'autoGainControl': true,
+        },
+      });
 
-    localVideo.srcObject = stream;
-    localStream = stream;
+      for (final track in stream.getAudioTracks()) {
+        track.enabled = true;
+      }
+
+      localVideo.srcObject = stream;
+      localStream = stream;
+    } catch (e) {
+      debugPrint('Error acquiring media stream (mic/camera): $e');
+      rethrow;
+    }
   }
 
   // ── Hang up ────────────────────────────────────────────────────────────────
@@ -204,7 +213,15 @@ class Signaling {
       }
     };
 
-    final offer = await peerConnection!.createOffer();
+    final offerConstraints = {
+      'mandatory': {
+        'OfferToReceiveAudio': true,
+        'OfferToReceiveVideo': isVideo,
+      },
+      'optional': [],
+    };
+
+    final offer = await peerConnection!.createOffer(offerConstraints);
     await peerConnection!.setLocalDescription(offer);
 
     await Supabase.instance.client.from('rooms').update({
@@ -315,7 +332,15 @@ class Signaling {
     _remoteDescriptionSet = true;
     await _flushPendingCandidates();
 
-    final answer = await peerConnection!.createAnswer();
+    final answerConstraints = {
+      'mandatory': {
+        'OfferToReceiveAudio': true,
+        'OfferToReceiveVideo': true,
+      },
+      'optional': [],
+    };
+
+    final answer = await peerConnection!.createAnswer(answerConstraints);
     await peerConnection!.setLocalDescription(answer);
 
     await Supabase.instance.client.from('rooms').update({
@@ -407,17 +432,22 @@ class Signaling {
     peerConnection?.onTrack = (RTCTrackEvent event) async {
       if (event.streams.isNotEmpty) {
         remoteStream = event.streams[0];
-        onAddRemoteStream?.call(remoteStream!);
       } else {
         remoteStream ??= await createLocalMediaStream('remote_stream');
         remoteStream?.addTrack(event.track);
-        if (remoteStream != null) {
-          onAddRemoteStream?.call(remoteStream!);
-        }
+      }
+      for (final track in remoteStream?.getAudioTracks() ?? []) {
+        track.enabled = true;
+      }
+      if (remoteStream != null) {
+        onAddRemoteStream?.call(remoteStream!);
       }
     };
     peerConnection?.onAddStream = (MediaStream stream) {
       remoteStream = stream;
+      for (final track in stream.getAudioTracks()) {
+        track.enabled = true;
+      }
       onAddRemoteStream?.call(remoteStream!);
     };
   }
