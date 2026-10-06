@@ -66,13 +66,17 @@ class SupabaseAuthService {
   Future<User?> signInWithGoogle() async {
     try {
       if (kIsWeb) {
-        final redirectUrl = Uri.base.origin + Uri.base.path;
+        String redirectUrl = Uri.base.origin + Uri.base.path;
+        if (!redirectUrl.endsWith('/')) {
+          redirectUrl = '$redirectUrl/';
+        }
         await _client.auth.signInWithOAuth(
           OAuthProvider.google,
           redirectTo: redirectUrl,
         );
         return _client.auth.currentUser;
       }
+
 
       final googleUser = await _googleSignIn.signIn();
       if (googleUser == null) {
