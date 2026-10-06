@@ -496,7 +496,8 @@ class Signaling {
       if (event.streams.isNotEmpty) {
         remoteStream = event.streams[0];
       } else {
-        remoteStream ??= MediaStream([event.track]);
+        remoteStream ??= await createLocalMediaStream('remote_stream');
+        remoteStream?.addTrack(event.track);
       }
       for (final track in remoteStream?.getAudioTracks() ?? []) {
         track.enabled = true;
