@@ -99,32 +99,48 @@ class _VoiceCallScreenState extends State<VoiceCallScreen>
         final stats = await pc.getStats();
         double localLvl = 0.0;
         double remoteLvl = 0.0;
-        int sent = 0;
-        int recv = 0;
+        int maxSent = 0;
+        int maxRecv = 0;
 
         for (final report in stats) {
-          if (report.type == 'outbound-rtp' && report.values['kind'] == 'audio') {
-            sent += int.tryParse(report.values['bytesSent']?.toString() ?? '0') ?? 0;
-          }
-          if (report.type == 'inbound-rtp' && report.values['kind'] == 'audio') {
-            recv += int.tryParse(report.values['bytesReceived']?.toString() ?? '0') ?? 0;
-          }
-          if (report.values.containsKey('audioLevel')) {
-            final lvl = double.tryParse(report.values['audioLevel']?.toString() ?? '0') ?? 0.0;
-            if (report.type == 'media-source' || report.type == 'outbound-rtp') {
-              if (lvl > localLvl) localLvl = lvl;
-            } else {
-              if (lvl > remoteLvl) remoteLvl = lvl;
+          final type = report.type.toString().toLowerCase();
+          final Map<dynamic, dynamic> values = report.values;
+
+          values.forEach((k, v) {
+            final keyStr = k.toString().toLowerCase();
+            final valStr = v.toString();
+
+            if (type.contains('outbound') || keyStr.contains('sent')) {
+              if (keyStr.contains('bytessent')) {
+                final b = int.tryParse(valStr) ?? 0;
+                if (b > maxSent) maxSent = b;
+              }
             }
-          }
+
+            if (type.contains('inbound') || keyStr.contains('recv') || keyStr.contains('received')) {
+              if (keyStr.contains('bytesreceived')) {
+                final b = int.tryParse(valStr) ?? 0;
+                if (b > maxRecv) maxRecv = b;
+              }
+            }
+
+            if (keyStr.contains('audiolevel') || keyStr.contains('volume')) {
+              final lvl = double.tryParse(valStr) ?? 0.0;
+              if (type.contains('media-source') || type.contains('outbound') || keyStr.contains('input')) {
+                if (lvl > localLvl) localLvl = lvl;
+              } else {
+                if (lvl > remoteLvl) remoteLvl = lvl;
+              }
+            }
+          });
         }
 
         if (mounted) {
           setState(() {
             _localAudioLevel = localLvl;
             _remoteAudioLevel = remoteLvl;
-            _bytesSent = sent;
-            _bytesReceived = recv;
+            _bytesSent = maxSent;
+            _bytesReceived = maxRecv;
           });
         }
       } catch (_) {}
@@ -348,15 +364,15 @@ class _VoiceCallScreenState extends State<VoiceCallScreen>
             ),
           ),
 
-          // Active media renderer for audio routing
+          // Active media renderer for web browser audio routing
           Positioned(
-            bottom: 20,
-            left: 20,
-            child: SizedBox(
-              width: 80,
-              height: 80,
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(12),
+            top: 0,
+            left: 0,
+            child: Opacity(
+              opacity: 0.01,
+              child: SizedBox(
+                width: 4,
+                height: 4,
                 child: RTCVideoView(_remoteRenderer),
               ),
             ),

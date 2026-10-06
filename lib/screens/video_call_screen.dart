@@ -65,32 +65,48 @@ class _VideoCallScreenState extends State<VideoCallScreen>
         final stats = await pc.getStats();
         double localLvl = 0.0;
         double remoteLvl = 0.0;
-        int sent = 0;
-        int recv = 0;
+        int maxSent = 0;
+        int maxRecv = 0;
 
         for (final report in stats) {
-          if (report.type == 'outbound-rtp') {
-            sent += int.tryParse(report.values['bytesSent']?.toString() ?? '0') ?? 0;
-          }
-          if (report.type == 'inbound-rtp') {
-            recv += int.tryParse(report.values['bytesReceived']?.toString() ?? '0') ?? 0;
-          }
-          if (report.values.containsKey('audioLevel')) {
-            final lvl = double.tryParse(report.values['audioLevel']?.toString() ?? '0') ?? 0.0;
-            if (report.type == 'media-source' || report.type == 'outbound-rtp') {
-              if (lvl > localLvl) localLvl = lvl;
-            } else {
-              if (lvl > remoteLvl) remoteLvl = lvl;
+          final type = report.type.toString().toLowerCase();
+          final Map<dynamic, dynamic> values = report.values;
+
+          values.forEach((k, v) {
+            final keyStr = k.toString().toLowerCase();
+            final valStr = v.toString();
+
+            if (type.contains('outbound') || keyStr.contains('sent')) {
+              if (keyStr.contains('bytessent')) {
+                final b = int.tryParse(valStr) ?? 0;
+                if (b > maxSent) maxSent = b;
+              }
             }
-          }
+
+            if (type.contains('inbound') || keyStr.contains('recv') || keyStr.contains('received')) {
+              if (keyStr.contains('bytesreceived')) {
+                final b = int.tryParse(valStr) ?? 0;
+                if (b > maxRecv) maxRecv = b;
+              }
+            }
+
+            if (keyStr.contains('audiolevel') || keyStr.contains('volume')) {
+              final lvl = double.tryParse(valStr) ?? 0.0;
+              if (type.contains('media-source') || type.contains('outbound') || keyStr.contains('input')) {
+                if (lvl > localLvl) localLvl = lvl;
+              } else {
+                if (lvl > remoteLvl) remoteLvl = lvl;
+              }
+            }
+          });
         }
 
         if (mounted) {
           setState(() {
             _localAudioLevel = localLvl;
             _remoteAudioLevel = remoteLvl;
-            _bytesSent = sent;
-            _bytesReceived = recv;
+            _bytesSent = maxSent;
+            _bytesReceived = maxRecv;
           });
         }
       } catch (_) {}

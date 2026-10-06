@@ -29,28 +29,16 @@ class Signaling {
           'stun:stun2.l.google.com:19302',
           'stun:stun3.l.google.com:19302',
           'stun:stun4.l.google.com:19302',
+          'stun:stun.relay.metered.ca:80',
         ]
       },
       {
-        'urls': 'stun:stun.relay.metered.ca:80',
-      },
-      {
-        'urls': 'turn:global.relay.metered.ca:80',
-        'username': 'e05c4a4a1347fef5fedaa1c5',
-        'credential': 'fCBVVCuN/6gVZrFj',
-      },
-      {
-        'urls': 'turn:global.relay.metered.ca:80?transport=tcp',
-        'username': 'e05c4a4a1347fef5fedaa1c5',
-        'credential': 'fCBVVCuN/6gVZrFj',
-      },
-      {
-        'urls': 'turn:global.relay.metered.ca:443',
-        'username': 'e05c4a4a1347fef5fedaa1c5',
-        'credential': 'fCBVVCuN/6gVZrFj',
-      },
-      {
-        'urls': 'turns:global.relay.metered.ca:443?transport=tcp',
+        'urls': [
+          'turn:global.relay.metered.ca:80',
+          'turn:global.relay.metered.ca:80?transport=tcp',
+          'turn:global.relay.metered.ca:443',
+          'turns:global.relay.metered.ca:443?transport=tcp',
+        ],
         'username': 'e05c4a4a1347fef5fedaa1c5',
         'credential': 'fCBVVCuN/6gVZrFj',
       },
