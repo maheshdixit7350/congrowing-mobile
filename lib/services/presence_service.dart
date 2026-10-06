@@ -4,25 +4,23 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../main.dart' show supabaseInitialized;
 import 'supabase_auth_service.dart';
 
-/// Singleton service that manages real-time WebSocket Presence for sub-second online user tracking.
+/// Singleton service managing real-time sub-second WebSocket presence across Web and Mobile.
 class PresenceService {
   PresenceService._();
   static final PresenceService instance = PresenceService._();
 
   RealtimeChannel? _channel;
-  final StreamController<int> _countController = StreamController<int>.broadcast();
-  final StreamController<List<Map<String, dynamic>>> _usersController =
-      StreamController<List<Map<String, dynamic>>>.broadcast();
+  Timer? _pingTimer;
+  final Set<String> _onlineUserIds = {};
+  final Map<String, DateTime> _lastSeenMap = {};
 
+  final StreamController<int> _countController = StreamController<int>.broadcast();
   int _currentOnlineCount = 1;
-  List<Map<String, dynamic>> _onlineUsersList = [];
 
   Stream<int> get streamOnlineCount => _countController.stream;
-  Stream<List<Map<String, dynamic>>> get streamOnlineUsers => _usersController.stream;
   int get currentOnlineCount => _currentOnlineCount;
-  List<Map<String, dynamic>> get currentOnlineUsersList => _onlineUsersList;
 
-  /// Initialize real-time WebSocket Presence channel.
+  /// Initialize real-time WebSocket Broadcast channel.
   Future<void> initPresence() async {
     if (!supabaseInitialized) return;
 
@@ -32,93 +30,110 @@ class PresenceService {
     await leavePresence();
 
     try {
-      final channel = Supabase.instance.client.channel('online_presence');
-      _channel = channel;
+      _channel = Supabase.instance.client.channel('online_presence');
 
-      channel.onPresenceSync(() {
-        _updatePresenceState();
-      });
+      // Listen for instant broadcast events from other devices (< 50ms)
+      _channel?.onBroadcast(
+        event: 'presence',
+        callback: (payload) {
+          final uid = payload['user_id']?.toString();
+          final status = payload['status']?.toString();
+          if (uid != null && uid.isNotEmpty) {
+            final now = DateTime.now().toUtc();
+            _lastSeenMap[uid] = now;
 
-      channel.subscribe((status, [error]) {
-        if (status == RealtimeSubscribeStatus.subscribed) {
-          final metadata = user.userMetadata ?? {};
-          final rawName = metadata['full_name'] ?? metadata['name'];
-          final name = rawName != null
-              ? rawName.toString()
-              : (user.email?.isNotEmpty == true ? user.email!.split('@')[0] : 'User');
-          final rawAvatar = metadata['avatar_url'] ?? metadata['picture'];
-          final avatarUrl = rawAvatar != null ? rawAvatar.toString() : '';
-
-          try {
-            channel.track({
-              'user_id': user.id,
-              'email': user.email ?? '',
-              'name': name,
-              'avatar_url': avatarUrl,
-              'online_at': DateTime.now().toUtc().toIso8601String(),
-            });
-          } catch (e) {
-            debugPrint('Error tracking presence payload: $e');
+            if (status == 'offline') {
+              _onlineUserIds.remove(uid);
+            } else {
+              _onlineUserIds.add(uid);
+            }
+            _updateCount(myUid: user.id);
           }
+        },
+      );
+
+      _channel?.subscribe((status, [error]) {
+        if (status == RealtimeSubscribeStatus.subscribed) {
+          _sendPresencePing(user.id, 'online');
+
+          // Repeat ping every 3 seconds to keep active state live across all connected devices
+          _pingTimer?.cancel();
+          _pingTimer = Timer.periodic(const Duration(seconds: 3), (_) {
+            _sendPresencePing(user.id, 'online');
+            _cleanStaleUsers(myUid: user.id);
+          });
         }
       });
     } catch (e) {
-      debugPrint('Error initializing presence channel: $e');
+      debugPrint('Error initializing presence broadcast: $e');
     }
   }
 
-  void _updatePresenceState() {
-    final ch = _channel;
-    if (ch == null) return;
+  void _sendPresencePing(String uid, String status) {
     try {
-      final state = ch.presenceState();
-      final Map<String, Map<String, dynamic>> uniqueUsers = {};
-
-      for (final presences in state.values) {
-        for (final p in presences) {
-          final payload = p.payload;
-          final uid = payload['user_id']?.toString();
-          if (uid != null && uid.isNotEmpty) {
-            uniqueUsers[uid] = payload;
-          }
-        }
-      }
-
-      final count = uniqueUsers.length;
-      _currentOnlineCount = count > 0 ? count : 1;
-      _onlineUsersList = uniqueUsers.values.toList();
-
-      if (!_countController.isClosed) {
-        _countController.add(_currentOnlineCount);
-      }
-      if (!_usersController.isClosed) {
-        _usersController.add(_onlineUsersList);
-      }
+      _channel?.sendBroadcast(
+        event: 'presence',
+        payload: {
+          'user_id': uid,
+          'status': status,
+          'timestamp': DateTime.now().toUtc().toIso8601String(),
+        },
+      );
     } catch (e) {
-      debugPrint('Error updating presence state: $e');
+      debugPrint('Error sending presence ping: $e');
+    }
+  }
+
+  void _cleanStaleUsers({required String myUid}) {
+    final now = DateTime.now().toUtc();
+    final toRemove = <String>[];
+
+    _lastSeenMap.forEach((uid, lastSeen) {
+      if (uid != myUid && now.difference(lastSeen).inSeconds.abs() > 10) {
+        toRemove.add(uid);
+      }
+    });
+
+    for (final uid in toRemove) {
+      _onlineUserIds.remove(uid);
+      _lastSeenMap.remove(uid);
+    }
+
+    _updateCount(myUid: myUid);
+  }
+
+  void _updateCount({required String myUid}) {
+    _onlineUserIds.add(myUid);
+    final count = _onlineUserIds.length;
+    _currentOnlineCount = count > 0 ? count : 1;
+
+    if (!_countController.isClosed) {
+      _countController.add(_currentOnlineCount);
     }
   }
 
   Future<void> leavePresence() async {
     try {
+      _pingTimer?.cancel();
+      _pingTimer = null;
+
+      final user = SupabaseAuthService.instance.currentUser;
+      if (user != null && _channel != null) {
+        _sendPresencePing(user.id, 'offline');
+      }
+
       final ch = _channel;
       if (ch != null) {
         _channel = null;
-        try {
-          await ch.untrack();
-        } catch (_) {}
-        try {
-          await Supabase.instance.client.removeChannel(ch);
-        } catch (_) {}
+        await Supabase.instance.client.removeChannel(ch);
       }
     } catch (e) {
-      debugPrint('Error leaving presence channel: $e');
+      debugPrint('Error leaving presence broadcast: $e');
     }
   }
 
   void dispose() {
     leavePresence();
     _countController.close();
-    _usersController.close();
   }
 }
