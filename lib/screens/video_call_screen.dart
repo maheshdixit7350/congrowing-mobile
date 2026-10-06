@@ -251,7 +251,7 @@ class _VideoCallScreenState extends State<VideoCallScreen>
           // 1. Remote Video (Full Screen)
           Container(
             color: const Color(0xFF0F172A),
-            child: _errorMsg == null && !_connecting
+            child: _errorMsg == null
                 ? RTCVideoView(
                     _remoteRenderer,
                     objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,

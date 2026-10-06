@@ -281,10 +281,17 @@ class _VoiceCallScreenState extends State<VoiceCallScreen>
           ),
 
           // Active media renderer for audio routing
-          SizedBox(
-            width: 1,
-            height: 1,
-            child: RTCVideoView(_remoteRenderer),
+          Positioned(
+            bottom: 0,
+            right: 0,
+            child: SizedBox(
+              width: 10,
+              height: 10,
+              child: Opacity(
+                opacity: 0.01,
+                child: RTCVideoView(_remoteRenderer),
+              ),
+            ),
           ),
         ],
       ),

@@ -17,9 +17,7 @@ class Signaling {
 
   StreamStateCallback? onAddRemoteStream;
 
-  final List<StreamSubscription> _activeSubs = [];
-
-  // Track whether remote description has been set so we can buffer ICE
+  final List<Timer> _activeTimers = [];
   bool _remoteDescriptionSet = false;
   final List<RTCIceCandidate> _pendingCandidates = [];
 
@@ -30,6 +28,7 @@ class Signaling {
           'stun:stun1.l.google.com:19302',
           'stun:stun2.l.google.com:19302',
           'stun:stun3.l.google.com:19302',
+          'stun:stun4.l.google.com:19302',
         ]
       },
       {
@@ -65,20 +64,20 @@ class Signaling {
       RTCVideoRenderer localVideo, RTCVideoRenderer remoteVideo,
       {bool isVideo = true}) async {
     try {
-      final stream = await navigator.mediaDevices.getUserMedia({
-        'video': isVideo
-            ? {
-                'facingMode': 'user',
-                'width': {'ideal': 1280},
-                'height': {'ideal': 720},
-              }
-            : false,
+      final mediaConstraints = <String, dynamic>{
         'audio': {
           'echoCancellation': true,
           'noiseSuppression': true,
           'autoGainControl': true,
         },
-      });
+        'video': isVideo
+            ? {
+                'facingMode': 'user',
+              }
+            : false,
+      };
+
+      final stream = await navigator.mediaDevices.getUserMedia(mediaConstraints);
 
       for (final track in stream.getAudioTracks()) {
         track.enabled = true;
@@ -88,7 +87,20 @@ class Signaling {
       localStream = stream;
     } catch (e) {
       debugPrint('Error acquiring media stream (mic/camera): $e');
-      rethrow;
+      try {
+        final stream = await navigator.mediaDevices.getUserMedia({
+          'audio': true,
+          'video': isVideo,
+        });
+        for (final track in stream.getAudioTracks()) {
+          track.enabled = true;
+        }
+        localVideo.srcObject = stream;
+        localStream = stream;
+      } catch (err) {
+        debugPrint('Fallback getUserMedia failed: $err');
+        rethrow;
+      }
     }
   }
 
@@ -96,12 +108,12 @@ class Signaling {
 
   Future<void> hangUp(RTCVideoRenderer localVideo) async {
     try {
-      for (final sub in _activeSubs) {
+      for (final timer in _activeTimers) {
         try {
-          sub.cancel();
+          timer.cancel();
         } catch (_) {}
       }
-      _activeSubs.clear();
+      _activeTimers.clear();
 
       final tracks = localVideo.srcObject?.getTracks() ?? [];
       for (final track in tracks) {
@@ -162,7 +174,6 @@ class Signaling {
   // ── Create Room (Caller) ───────────────────────────────────────────────────
 
   /// Creates a WebRTC room targeting a specific [calleeUid].
-  /// If [calleeUid] is empty, falls back to random matchmaking mode.
   Future<String> createRoom(bool isVideo, {String calleeUid = ''}) async {
     if (!supabaseInitialized) return '';
 
@@ -171,7 +182,7 @@ class Signaling {
 
     final uid = SupabaseAuthService.instance.currentUser?.id;
 
-    final insertPayload = {
+    final insertPayload = <String, dynamic>{
       'type': isVideo ? 'video' : 'voice',
       'status': calleeUid.isNotEmpty ? 'ringing' : 'waiting',
       'caller_id': uid,
@@ -230,57 +241,66 @@ class Signaling {
       'updated_at': DateTime.now().toIso8601String(),
     }).eq('id', roomId!);
 
-    // Listen for SDP answer from callee
-    final answerSub = Supabase.instance.client
-        .from('rooms')
-        .stream(primaryKey: ['id'])
-        .eq('id', roomId!)
-        .listen((data) async {
-          if (data.isNotEmpty) {
-            final roomData = data.first;
-            if (!_remoteDescriptionSet && roomData['answer'] != null) {
-              final answerMap = Map<String, dynamic>.from(roomData['answer']);
-              final answer = RTCSessionDescription(
-                answerMap['sdp'],
-                answerMap['type'],
-              );
-              try {
-                await peerConnection?.setRemoteDescription(answer);
-                _remoteDescriptionSet = true;
-                await _flushPendingCandidates();
-              } catch (e) {
-                debugPrint('Error setting remote description: $e');
-              }
-            }
-          }
-        });
-    _activeSubs.add(answerSub);
+    // Periodic 500ms REST polling for SDP answer from callee
+    Timer? answerTimer;
+    answerTimer = Timer.periodic(const Duration(milliseconds: 500), (_) async {
+      if (_remoteDescriptionSet || peerConnection == null || roomId == null) {
+        answerTimer?.cancel();
+        return;
+      }
+      try {
+        final res = await Supabase.instance.client
+            .from('rooms')
+            .select('answer')
+            .eq('id', roomId!)
+            .maybeSingle();
+        if (res != null && res['answer'] != null && !_remoteDescriptionSet) {
+          final answerMap = Map<String, dynamic>.from(res['answer']);
+          final answer = RTCSessionDescription(answerMap['sdp'], answerMap['type']);
+          await peerConnection?.setRemoteDescription(answer);
+          _remoteDescriptionSet = true;
+          await _flushPendingCandidates();
+          answerTimer?.cancel();
+        }
+      } catch (e) {
+        debugPrint('Error polling answer: $e');
+      }
+    });
+    _activeTimers.add(answerTimer);
 
-    // Listen for ICE candidates from callee
+    // Periodic 500ms REST polling for Callee ICE candidates
     final addedCalleeCandidates = <String>{};
-    final calleeCandidateSub = Supabase.instance.client
-        .from('callee_candidates')
-        .stream(primaryKey: ['id'])
-        .eq('room_id', roomId!)
-        .listen((snapshot) {
-          for (final candMap in snapshot) {
-            final candidateStr = candMap['candidate'] as String?;
-            if (candidateStr != null &&
-                !addedCalleeCandidates.contains(candidateStr)) {
-              addedCalleeCandidates.add(candidateStr);
-              final sdpMid = (candMap['sdpMid'] ?? candMap['sdpmid']) as String?;
-              final sdpMLineIndex = (candMap['sdpMLineIndex'] ?? candMap['sdpmlineindex']) as int?;
-              _addIceCandidateSafe(
-                RTCIceCandidate(
-                  candidateStr,
-                  sdpMid,
-                  sdpMLineIndex,
-                ),
-              );
+    Timer? calleeCandidateTimer;
+    calleeCandidateTimer = Timer.periodic(const Duration(milliseconds: 500), (_) async {
+      if (roomId == null || peerConnection == null) {
+        calleeCandidateTimer?.cancel();
+        return;
+      }
+      try {
+        final list = await Supabase.instance.client
+            .from('callee_candidates')
+            .select()
+            .eq('room_id', roomId!);
+        for (final candMap in list) {
+          final candidateStr = candMap['candidate'] as String?;
+          if (candidateStr != null && !addedCalleeCandidates.contains(candidateStr)) {
+            addedCalleeCandidates.add(candidateStr);
+            final sdpMid = (candMap['sdpMid'] ?? candMap['sdpmid'])?.toString();
+            final rawIndex = candMap['sdpMLineIndex'] ?? candMap['sdpmlineindex'];
+            int? sdpMLineIndex;
+            if (rawIndex is int) {
+              sdpMLineIndex = rawIndex;
+            } else if (rawIndex != null) {
+              sdpMLineIndex = int.tryParse(rawIndex.toString());
             }
+            await _addIceCandidateSafe(RTCIceCandidate(candidateStr, sdpMid, sdpMLineIndex));
           }
-        });
-    _activeSubs.add(calleeCandidateSub);
+        }
+      } catch (e) {
+        debugPrint('Error polling callee ICE candidates: $e');
+      }
+    });
+    _activeTimers.add(calleeCandidateTimer);
 
     return roomId!;
   }
@@ -294,12 +314,27 @@ class Signaling {
     _remoteDescriptionSet = false;
     _pendingCandidates.clear();
 
-    final roomData = await Supabase.instance.client
-        .from('rooms')
-        .select()
-        .eq('id', joinRoomId)
-        .maybeSingle();
-    if (roomData == null) return;
+    // Poll for offer in rooms table up to 10s to eliminate race condition
+    Map<String, dynamic>? roomData;
+    for (int i = 0; i < 20; i++) {
+      final res = await Supabase.instance.client
+          .from('rooms')
+          .select()
+          .eq('id', joinRoomId)
+          .maybeSingle();
+      if (res != null && res['offer'] != null) {
+        roomData = res;
+        break;
+      }
+      await Future.delayed(const Duration(milliseconds: 500));
+    }
+
+    if (roomData == null || roomData['offer'] == null) {
+      debugPrint('Room or offer not found for room $joinRoomId');
+      return;
+    }
+
+    final isRoomVideo = roomData['type'] == 'video';
 
     peerConnection = await createPeerConnection(configuration);
     _registerPeerConnectionListeners();
@@ -324,8 +359,6 @@ class Signaling {
       }
     };
 
-    // onTrack is already registered in _registerPeerConnectionListeners()
-
     final offerMap = Map<String, dynamic>.from(roomData['offer']);
     await peerConnection?.setRemoteDescription(
       RTCSessionDescription(offerMap['sdp'], offerMap['type']),
@@ -336,7 +369,7 @@ class Signaling {
     final answerConstraints = <String, dynamic>{
       'mandatory': {
         'OfferToReceiveAudio': 'true',
-        'OfferToReceiveVideo': 'true',
+        'OfferToReceiveVideo': isRoomVideo ? 'true' : 'false',
       },
       'optional': [],
     };
@@ -350,69 +383,101 @@ class Signaling {
       'updated_at': DateTime.now().toIso8601String(),
     }).eq('id', joinRoomId);
 
-    // Listen for ICE candidates from caller
+    // Periodic 500ms REST polling for Caller ICE candidates
     final addedCallerCandidates = <String>{};
-    final callerCandidateSub = Supabase.instance.client
-        .from('caller_candidates')
-        .stream(primaryKey: ['id'])
-        .eq('room_id', joinRoomId)
-        .listen((snapshot) {
-          for (final candMap in snapshot) {
-            final candidateStr = candMap['candidate'] as String?;
-            if (candidateStr != null &&
-                !addedCallerCandidates.contains(candidateStr)) {
-              addedCallerCandidates.add(candidateStr);
-              final sdpMid = (candMap['sdpMid'] ?? candMap['sdpmid']) as String?;
-              final sdpMLineIndex = (candMap['sdpMLineIndex'] ?? candMap['sdpmlineindex']) as int?;
-              _addIceCandidateSafe(
-                RTCIceCandidate(
-                  candidateStr,
-                  sdpMid,
-                  sdpMLineIndex,
-                ),
-              );
+    Timer? callerCandidateTimer;
+    callerCandidateTimer = Timer.periodic(const Duration(milliseconds: 500), (_) async {
+      if (roomId == null || peerConnection == null) {
+        callerCandidateTimer?.cancel();
+        return;
+      }
+      try {
+        final list = await Supabase.instance.client
+            .from('caller_candidates')
+            .select()
+            .eq('room_id', joinRoomId);
+        for (final candMap in list) {
+          final candidateStr = candMap['candidate'] as String?;
+          if (candidateStr != null && !addedCallerCandidates.contains(candidateStr)) {
+            addedCallerCandidates.add(candidateStr);
+            final sdpMid = (candMap['sdpMid'] ?? candMap['sdpmid'])?.toString();
+            final rawIndex = candMap['sdpMLineIndex'] ?? candMap['sdpmlineindex'];
+            int? sdpMLineIndex;
+            if (rawIndex is int) {
+              sdpMLineIndex = rawIndex;
+            } else if (rawIndex != null) {
+              sdpMLineIndex = int.tryParse(rawIndex.toString());
             }
+            await _addIceCandidateSafe(RTCIceCandidate(candidateStr, sdpMid, sdpMLineIndex));
           }
-        });
-    _activeSubs.add(callerCandidateSub);
+        }
+      } catch (e) {
+        debugPrint('Error polling caller ICE candidates: $e');
+      }
+    });
+    _activeTimers.add(callerCandidateTimer);
   }
 
   // ── Incoming Call Listener ────────────────────────────────────────────────
 
-  /// Listens for incoming calls where [myUid] is the callee.
-  /// Calls [onIncomingCall] with (roomId, callType, callerId) when found.
-  /// Returns the subscription so callers can cancel it.
   StreamSubscription listenForIncomingCall(
       String myUid, IncomingCallCallback onIncomingCall) {
-    final sub = Supabase.instance.client
-        .from('rooms')
-        .stream(primaryKey: ['id'])
-        .eq('callee_id', myUid)
-        .listen((data) {
-          for (final row in data) {
-            final status = row['status'] as String? ?? '';
-            final rid = row['id'].toString();
-            final callType = row['type'] as String? ?? 'video';
-            final callerId = row['caller_id'] as String? ?? '';
-            onIncomingCall(rid, callType, callerId, status);
-          }
-        });
-    return sub;
+    final controller = StreamController<dynamic>();
+
+    Timer? timer = Timer.periodic(const Duration(seconds: 1), (_) async {
+      if (!supabaseInitialized) return;
+      try {
+        final data = await Supabase.instance.client
+            .from('rooms')
+            .select()
+            .eq('callee_id', myUid)
+            .order('created_at', ascending: false)
+            .limit(5);
+
+        for (final row in data) {
+          final status = row['status'] as String? ?? '';
+          final rid = row['id'].toString();
+          final callType = row['type'] as String? ?? 'video';
+          final callerId = row['caller_id'] as String? ?? '';
+          onIncomingCall(rid, callType, callerId, status);
+        }
+      } catch (_) {}
+    });
+
+    controller.onCancel = () {
+      timer?.cancel();
+      controller.close();
+    };
+
+    return controller.stream.listen((_) {});
   }
 
   /// Listen for room updates (e.g. status changes like 'ended')
   StreamSubscription listenToRoomStatus(
       String targetRoomId, void Function(String status) onStatusChanged) {
-    return Supabase.instance.client
-        .from('rooms')
-        .stream(primaryKey: ['id'])
-        .eq('id', targetRoomId)
-        .listen((snapshot) {
-          if (snapshot.isNotEmpty) {
-            final status = snapshot.first['status'] as String? ?? '';
-            onStatusChanged(status);
-          }
-        });
+    final controller = StreamController<dynamic>();
+
+    Timer? timer = Timer.periodic(const Duration(milliseconds: 500), (_) async {
+      if (!supabaseInitialized) return;
+      try {
+        final snapshot = await Supabase.instance.client
+            .from('rooms')
+            .select('status')
+            .eq('id', targetRoomId);
+
+        if (snapshot.isNotEmpty) {
+          final status = snapshot.first['status'] as String? ?? '';
+          onStatusChanged(status);
+        }
+      } catch (_) {}
+    });
+
+    controller.onCancel = () {
+      timer?.cancel();
+      controller.close();
+    };
+
+    return controller.stream.listen((_) {});
   }
 
   // ── Peer Connection Listeners ─────────────────────────────────────────────
