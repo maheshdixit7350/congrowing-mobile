@@ -313,8 +313,9 @@ class _VoiceCallScreenState extends State<VoiceCallScreen>
           ),
         ],
       ),
-    );
-  }
+    ),
+  );
+}
 
   Widget _buildTopBranding() {
     return Padding(

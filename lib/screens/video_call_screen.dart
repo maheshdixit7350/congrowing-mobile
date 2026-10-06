@@ -301,8 +301,9 @@ class _VideoCallScreenState extends State<VideoCallScreen>
             ),
         ],
       ),
-    );
-  }
+    ),
+  );
+}
 
   Widget _buildTopBranding() {
     return Positioned(
