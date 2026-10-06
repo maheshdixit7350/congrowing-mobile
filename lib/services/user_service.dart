@@ -353,8 +353,8 @@ class UserService {
       }).eq('id', uid);
 
       if (online) {
-        // Active heartbeat ping every 10 seconds to maintain sub-second runtime status
-        _heartbeatTimer = Timer.periodic(const Duration(seconds: 10), (_) async {
+        // Active heartbeat ping every 3 seconds to maintain sub-second runtime status
+        _heartbeatTimer = Timer.periodic(const Duration(seconds: 3), (_) async {
           final curUid = _currentUserId;
           if (curUid != null && supabaseInitialized) {
             try {
@@ -617,11 +617,11 @@ class UserService {
   }
 
   /// Stream total online users count in real-time.
-  /// Refreshes every 5 seconds to guarantee 100% synchronization across all browsers and devices.
+  /// Refreshes every 1 second to guarantee 100% synchronization across all browsers and devices.
   Stream<int> streamOnlineCount() {
     if (!supabaseInitialized) return Stream.value(1);
 
-    // Controller emitting initial count immediately, then polling every 5 seconds
+    // Controller emitting initial count immediately, then polling every 1 second
     final controller = StreamController<int>();
 
     void updateCount() async {
@@ -634,8 +634,8 @@ class UserService {
     // Initial immediate fetch
     updateCount();
 
-    // Periodic 5s polling
-    final timer = Timer.periodic(const Duration(seconds: 5), (_) => updateCount());
+    // Periodic 1s polling
+    final timer = Timer.periodic(const Duration(seconds: 1), (_) => updateCount());
 
     controller.onCancel = () {
       timer.cancel();
@@ -645,7 +645,7 @@ class UserService {
     return controller.stream;
   }
 
-  /// Helper to query active users with fresh heartbeats (within 45 seconds).
+  /// Helper to query active users with fresh heartbeats (within 12 seconds).
   Future<int> _fetchActiveOnlineCount() async {
     final uid = _currentUserId;
     try {
@@ -663,7 +663,7 @@ class UserService {
         try {
           final lastSeen = DateTime.parse(lastSeenStr).toUtc();
           final diff = now.difference(lastSeen).inSeconds.abs();
-          return diff <= 45;
+          return diff <= 12;
         } catch (_) {
           return false;
         }
