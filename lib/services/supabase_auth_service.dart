@@ -101,7 +101,7 @@ class SupabaseAuthService {
             final photoUrl = googleUser.photoUrl;
             if (photoUrl != null && photoUrl.isNotEmpty) {
               try {
-                await UserService.instance.updateUserProfile({'avatar_url': photoUrl});
+                await UserService.instance.updateProfile({'avatar_url': photoUrl});
               } catch (_) {}
             }
           }
