@@ -120,6 +120,7 @@ class _ConGrowingAppState extends State<ConGrowingApp>
   BuildContext? _incomingCallDialogContext;
   bool _isIncomingCallDialogShowing = false;
   String? _activeIncomingRoomId;
+  final Set<String> _handledRoomIds = {};
 
   @override
   void initState() {
@@ -185,7 +186,9 @@ class _ConGrowingAppState extends State<ConGrowingApp>
         if (nav == null) return;
 
         if (status == 'ringing') {
-          if (_isIncomingCallDialogShowing || _activeIncomingRoomId != null) {
+          if (_isIncomingCallDialogShowing ||
+              _activeIncomingRoomId != null ||
+              _handledRoomIds.contains(roomId)) {
             return;
           }
           _activeIncomingRoomId = roomId;
@@ -209,7 +212,7 @@ class _ConGrowingAppState extends State<ConGrowingApp>
 
   void _showIncomingCallDialog(
       BuildContext context, String roomId, String callType, String callerId) async {
-    if (_isIncomingCallDialogShowing) return;
+    if (_isIncomingCallDialogShowing || _handledRoomIds.contains(roomId)) return;
     _isIncomingCallDialogShowing = true;
     _activeIncomingRoomId = roomId;
 
@@ -221,7 +224,7 @@ class _ConGrowingAppState extends State<ConGrowingApp>
     final callerName = callerUser?.name ?? 'Someone';
     final callerAvatar = callerUser?.avatarUrl;
 
-    if (!mounted || !context.mounted) {
+    if (!mounted || !context.mounted || _handledRoomIds.contains(roomId)) {
       _isIncomingCallDialogShowing = false;
       _activeIncomingRoomId = null;
       AudioHelper.stopPlayer(_incomingRingtonePlayer);
@@ -277,6 +280,7 @@ class _ConGrowingAppState extends State<ConGrowingApp>
           actions: [
             TextButton(
               onPressed: () {
+                _handledRoomIds.add(roomId);
                 Navigator.pop(ctx);
                 _activeIncomingRoomId = null;
                 _incomingCallDialogContext = null;
@@ -302,6 +306,7 @@ class _ConGrowingAppState extends State<ConGrowingApp>
             ),
             TextButton(
               onPressed: () {
+                _handledRoomIds.add(roomId);
                 Navigator.pop(ctx);
                 _activeIncomingRoomId = null;
                 _incomingCallDialogContext = null;
@@ -336,6 +341,7 @@ class _ConGrowingAppState extends State<ConGrowingApp>
         );
       },
     ).then((_) {
+      _handledRoomIds.add(roomId);
       _activeIncomingRoomId = null;
       _incomingCallDialogContext = null;
       _isIncomingCallDialogShowing = false;
