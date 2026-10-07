@@ -41,13 +41,6 @@ class _VoiceCallScreenState extends State<VoiceCallScreen>
   bool _initialized = false;
   String? _errorMsg;
 
-  // Audio stats & level monitoring
-  double _localAudioLevel = 0.0;
-  double _remoteAudioLevel = 0.0;
-  int _bytesSent = 0;
-  int _bytesReceived = 0;
-  Timer? _statsTimer;
-
   // Duration timer
   final Stopwatch _callDuration = Stopwatch();
   Timer? _durationTimer;
@@ -90,63 +83,6 @@ class _VoiceCallScreenState extends State<VoiceCallScreen>
     }
   }
 
-  void _startStatsTimer() {
-    _statsTimer?.cancel();
-    _statsTimer = Timer.periodic(const Duration(milliseconds: 200), (_) async {
-      final pc = signaling.peerConnection;
-      if (pc == null || !mounted) return;
-      try {
-        final stats = await pc.getStats();
-        double localLvl = 0.0;
-        double remoteLvl = 0.0;
-        int maxSent = 0;
-        int maxRecv = 0;
-
-        for (final report in stats) {
-          final type = report.type.toString().toLowerCase();
-          final Map<dynamic, dynamic> values = report.values;
-
-          values.forEach((k, v) {
-            final keyStr = k.toString().toLowerCase();
-            final valStr = v.toString();
-
-            if (type.contains('outbound') || keyStr.contains('sent')) {
-              if (keyStr.contains('bytessent')) {
-                final b = int.tryParse(valStr) ?? 0;
-                if (b > maxSent) maxSent = b;
-              }
-            }
-
-            if (type.contains('inbound') || keyStr.contains('recv') || keyStr.contains('received')) {
-              if (keyStr.contains('bytesreceived')) {
-                final b = int.tryParse(valStr) ?? 0;
-                if (b > maxRecv) maxRecv = b;
-              }
-            }
-
-            if (keyStr.contains('audiolevel') || keyStr.contains('volume')) {
-              final lvl = double.tryParse(valStr) ?? 0.0;
-              if (type.contains('media-source') || type.contains('outbound') || keyStr.contains('input')) {
-                if (lvl > localLvl) localLvl = lvl;
-              } else {
-                if (lvl > remoteLvl) remoteLvl = lvl;
-              }
-            }
-          });
-        }
-
-        if (mounted) {
-          setState(() {
-            _localAudioLevel = localLvl;
-            _remoteAudioLevel = remoteLvl;
-            _bytesSent = maxSent;
-            _bytesReceived = maxRecv;
-          });
-        }
-      } catch (_) {}
-    });
-  }
-
   Future<void> _initVoiceCall() async {
     if (!supabaseInitialized) {
       setState(() {
@@ -184,7 +120,6 @@ class _VoiceCallScreenState extends State<VoiceCallScreen>
           _radarController.stop();
           _callDuration.start();
           _startDurationTimer();
-          _startStatsTimer();
         }
       };
 
@@ -556,97 +491,7 @@ class _VoiceCallScreenState extends State<VoiceCallScreen>
             ],
           ),
         ),
-        const SizedBox(height: 16),
-        _buildAudioDiagnosticWidget(),
       ],
-    );
-  }
-
-  Widget _buildAudioDiagnosticWidget() {
-    final sentKb = (_bytesSent / 1024).toStringAsFixed(1);
-    final recvKb = (_bytesReceived / 1024).toStringAsFixed(1);
-
-    return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-      decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.08),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: Colors.white12),
-      ),
-      child: Column(
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              // Local Mic Level
-              Row(
-                children: [
-                  Icon(
-                    _audioMuted ? Icons.mic_off_rounded : Icons.mic_rounded,
-                    color: _audioMuted ? Colors.redAccent : Colors.greenAccent,
-                    size: 15,
-                  ),
-                  const SizedBox(width: 4),
-                  Text(
-                    'Mic: ',
-                    style: GoogleFonts.inter(color: Colors.white70, fontSize: 12),
-                  ),
-                  _buildVolumeBar(_localAudioLevel, Colors.greenAccent),
-                ],
-              ),
-              // Remote Speaker Level
-              Row(
-                children: [
-                  const Icon(Icons.volume_up_rounded, color: Colors.cyanAccent, size: 15),
-                  const SizedBox(width: 4),
-                  Text(
-                    'Speaker: ',
-                    style: GoogleFonts.inter(color: Colors.white70, fontSize: 12),
-                  ),
-                  _buildVolumeBar(_remoteAudioLevel, Colors.cyanAccent),
-                ],
-              ),
-            ],
-          ),
-          const SizedBox(height: 6),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text(
-                '⬆️ Sent: $sentKb KB',
-                style: GoogleFonts.inter(color: Colors.white38, fontSize: 11),
-              ),
-              Text(
-                '🔊 Tap screen to enable audio',
-                style: GoogleFonts.inter(color: Colors.white54, fontSize: 10, fontWeight: FontWeight.w500),
-              ),
-              Text(
-                '⬇️ Recv: $recvKb KB',
-                style: GoogleFonts.inter(color: Colors.white38, fontSize: 11),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildVolumeBar(double level, Color activeColor) {
-    return Row(
-      children: List.generate(5, (index) {
-        final threshold = (index + 1) * 0.15;
-        final isActive = level >= threshold || (level > 0.02 && index == 0);
-        return Container(
-          width: 4,
-          height: 8 + (index * 2.5),
-          margin: const EdgeInsets.symmetric(horizontal: 1.5),
-          decoration: BoxDecoration(
-            color: isActive ? activeColor : Colors.white24,
-            borderRadius: BorderRadius.circular(2),
-          ),
-        );
-      }),
     );
   }
 
