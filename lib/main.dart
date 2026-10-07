@@ -38,6 +38,7 @@ import 'utils/theme_provider.dart';
 import 'utils/ad_manager.dart';
 import 'services/user_service.dart';
 import 'services/signaling.dart';
+import 'models/user_model.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'services/supabase_config.dart';
 import 'services/supabase_auth_service.dart';
