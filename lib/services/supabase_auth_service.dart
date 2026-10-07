@@ -77,7 +77,6 @@ class SupabaseAuthService {
         return _client.auth.currentUser;
       }
 
-
       try {
         final googleUser = await _googleSignIn.signIn();
         if (googleUser == null) {
@@ -115,37 +114,9 @@ class SupabaseAuthService {
         );
         return _client.auth.currentUser;
       }
-          try {
-            // Update auth user metadata so picture/avatar_url are saved in auth
-            await _client.auth.updateUser(
-              UserAttributes(
-                data: {
-                  'avatar_url': photoUrl,
-                  'picture': photoUrl,
-                },
-              ),
-            );
-            debugPrint('Successfully updated auth user metadata with Google photoUrl: $photoUrl');
-          } catch (e) {
-            debugPrint('Failed to update auth user metadata: $e');
-          }
-
-          try {
-            // Also try to update the public 'users' table directly in case the user already exists there
-            await _client.from('users').update({
-              'avatar_url': photoUrl,
-            }).eq('id', user.id);
-            debugPrint('Successfully updated public.users table with Google photoUrl.');
-          } catch (_) {
-            // Fails if the user row doesn't exist in public.users yet (first-time login),
-            // which is fine since loadCurrentUser() will create it next.
-          }
-        }
-      }
-
-      return user;
+      return null;
     } catch (e) {
-      debugPrint('SUPABASE AUTH SERVICE ERROR (Google Auth): $e');
+      debugPrint('SUPABASE AUTH SERVICE ERROR (Google Sign-In): $e');
       rethrow;
     }
   }
