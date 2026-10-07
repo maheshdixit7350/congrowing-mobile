@@ -5,6 +5,8 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../main.dart' show supabaseInitialized;
 import 'supabase_auth_service.dart';
 
+import 'package:permission_handler/permission_handler.dart';
+
 typedef StreamStateCallback = void Function(MediaStream stream);
 typedef IncomingCallCallback = void Function(
     String roomId, String callType, String callerId, String status);
@@ -55,13 +57,20 @@ class Signaling {
   Future<void> openUserMedia(
       RTCVideoRenderer localVideo, RTCVideoRenderer remoteVideo,
       {bool isVideo = true}) async {
+    if (!kIsWeb) {
+      try {
+        await Permission.microphone.request();
+        if (isVideo) {
+          await Permission.camera.request();
+        }
+      } catch (e) {
+        debugPrint('Runtime permission error: $e');
+      }
+    }
+
     try {
       final mediaConstraints = <String, dynamic>{
-        'audio': {
-          'echoCancellation': true,
-          'noiseSuppression': true,
-          'autoGainControl': true,
-        },
+        'audio': true,
         'video': isVideo
             ? {
                 'facingMode': 'user',

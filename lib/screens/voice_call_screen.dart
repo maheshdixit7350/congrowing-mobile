@@ -311,16 +311,16 @@ class _VoiceCallScreenState extends State<VoiceCallScreen>
             ),
           ),
 
-          // Active media renderer for web browser audio routing
+          // Active media renderer for audio routing
           Positioned(
             top: 0,
             left: 0,
-            child: Opacity(
-              opacity: 0.01,
-              child: SizedBox(
-                width: 4,
-                height: 4,
-                child: RTCVideoView(_remoteRenderer),
+            child: SizedBox(
+              width: 1,
+              height: 1,
+              child: RTCVideoView(
+                _remoteRenderer,
+                objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
               ),
             ),
           ),

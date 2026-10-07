@@ -78,31 +78,43 @@ class SupabaseAuthService {
       }
 
 
-      final googleUser = await _googleSignIn.signIn();
-      if (googleUser == null) {
-        // User cancelled the sign-in flow
-        return null;
+      try {
+        final googleUser = await _googleSignIn.signIn();
+        if (googleUser == null) {
+          return null;
+        }
+
+        final googleAuth = await googleUser.authentication;
+        final idToken = googleAuth.idToken;
+        final accessToken = googleAuth.accessToken;
+
+        if (idToken != null) {
+          final response = await _client.auth.signInWithIdToken(
+            provider: OAuthProvider.google,
+            idToken: idToken,
+            accessToken: accessToken,
+          );
+
+          final user = response.user;
+
+          if (user != null) {
+            final photoUrl = googleUser.photoUrl;
+            if (photoUrl != null && photoUrl.isNotEmpty) {
+              try {
+                await UserService.instance.updateUserProfile({'avatar_url': photoUrl});
+              } catch (_) {}
+            }
+          }
+          return user;
+        }
+      } catch (nativeErr) {
+        debugPrint('Native Google Sign-In notice ($nativeErr). Falling back to Supabase OAuth...');
+        await _client.auth.signInWithOAuth(
+          OAuthProvider.google,
+          redirectTo: 'io.supabase.congrowing://login-callback',
+        );
+        return _client.auth.currentUser;
       }
-
-      final googleAuth = await googleUser.authentication;
-      final idToken = googleAuth.idToken;
-      final accessToken = googleAuth.accessToken;
-
-      if (idToken == null) {
-        throw Exception('Google Sign-In failed: No ID token received.');
-      }
-
-      final response = await _client.auth.signInWithIdToken(
-        provider: OAuthProvider.google,
-        idToken: idToken,
-        accessToken: accessToken,
-      );
-
-      final user = response.user;
-
-      if (user != null) {
-        final photoUrl = googleUser.photoUrl;
-        if (photoUrl != null && photoUrl.isNotEmpty) {
           try {
             // Update auth user metadata so picture/avatar_url are saved in auth
             await _client.auth.updateUser(
