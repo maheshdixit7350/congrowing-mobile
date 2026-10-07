@@ -230,58 +230,67 @@ class Signaling {
     await _setupTransceivers();
 
     // Setup Supabase Realtime Broadcast Channel for 0ms instant signaling
-    _realtimeChannel = Supabase.instance.client.channel('room_$roomId');
+    try {
+      _realtimeChannel = Supabase.instance.client.channel('room_$roomId');
 
-    _realtimeChannel!.onBroadcast(
-      event: 'webrtc_answer',
-      callback: (payload) async {
-        if (!_remoteDescriptionSet && peerConnection != null) {
-          debugPrint('🎙️ Received WebRTC answer via Realtime Broadcast!');
-          final sdp = payload['sdp']?.toString();
-          final type = payload['type']?.toString();
-          if (sdp != null && type != null) {
-            final answer = RTCSessionDescription(sdp, type);
-            await peerConnection?.setRemoteDescription(answer);
-            _remoteDescriptionSet = true;
-            await _flushPendingCandidates();
+      _realtimeChannel!.on(
+        RealtimeListenTypes.broadcast,
+        ChannelFilter(event: 'webrtc_answer'),
+        (payload, [ref]) async {
+          if (!_remoteDescriptionSet && peerConnection != null) {
+            debugPrint('🎙️ Received WebRTC answer via Realtime Broadcast!');
+            final sdp = payload['sdp']?.toString();
+            final type = payload['type']?.toString();
+            if (sdp != null && type != null) {
+              final answer = RTCSessionDescription(sdp, type);
+              await peerConnection?.setRemoteDescription(answer);
+              _remoteDescriptionSet = true;
+              await _flushPendingCandidates();
+            }
           }
-        }
-      },
-    );
+        },
+      );
 
-    _realtimeChannel!.onBroadcast(
-      event: 'webrtc_ice',
-      callback: (payload) async {
-        final candStr = payload['candidate']?.toString();
-        final sdpMid = payload['sdpMid']?.toString();
-        final rawIndex = payload['sdpMLineIndex'];
-        int? sdpMLineIndex;
-        if (rawIndex is int) {
-          sdpMLineIndex = rawIndex;
-        } else if (rawIndex != null) {
-          sdpMLineIndex = int.tryParse(rawIndex.toString());
-        }
-        if (candStr != null) {
-          await _addIceCandidateSafe(RTCIceCandidate(candStr, sdpMid, sdpMLineIndex));
-        }
-      },
-    );
+      _realtimeChannel!.on(
+        RealtimeListenTypes.broadcast,
+        ChannelFilter(event: 'webrtc_ice'),
+        (payload, [ref]) async {
+          final candStr = payload['candidate']?.toString();
+          final sdpMid = payload['sdpMid']?.toString();
+          final rawIndex = payload['sdpMLineIndex'];
+          int? sdpMLineIndex;
+          if (rawIndex is int) {
+            sdpMLineIndex = rawIndex;
+          } else if (rawIndex != null) {
+            sdpMLineIndex = int.tryParse(rawIndex.toString());
+          }
+          if (candStr != null) {
+            await _addIceCandidateSafe(RTCIceCandidate(candStr, sdpMid, sdpMLineIndex));
+          }
+        },
+      );
 
-    await _realtimeChannel!.subscribe();
+      await _realtimeChannel!.subscribe();
+    } catch (e) {
+      debugPrint('Realtime channel setup warning: $e');
+    }
 
     // ICE Candidate handler for Caller
     peerConnection?.onIceCandidate = (RTCIceCandidate? candidate) async {
       if (candidate == null || candidate.candidate == null) return;
       try {
         // 1. Instant Realtime Broadcast
-        _realtimeChannel?.sendBroadcast(
-          event: 'webrtc_ice',
-          payload: {
-            'candidate': candidate.candidate,
-            'sdpMid': candidate.sdpMid,
-            'sdpMLineIndex': candidate.sdpMLineIndex,
-          },
-        );
+        try {
+          _realtimeChannel?.send(
+            type: RealtimeListenTypes.broadcast,
+            event: 'webrtc_ice',
+            payload: {
+              'candidate': candidate.candidate,
+              'sdpMid': candidate.sdpMid,
+              'sdpMLineIndex': candidate.sdpMLineIndex,
+            },
+          );
+        } catch (_) {}
 
         // 2. DB Table fallback
         await Supabase.instance.client.from('caller_candidates').insert({
@@ -411,40 +420,48 @@ class Signaling {
     await _setupTransceivers();
 
     // Setup Supabase Realtime Broadcast Channel for 0ms instant signaling
-    _realtimeChannel = Supabase.instance.client.channel('room_$roomId');
+    try {
+      _realtimeChannel = Supabase.instance.client.channel('room_$roomId');
 
-    _realtimeChannel!.onBroadcast(
-      event: 'webrtc_ice',
-      callback: (payload) async {
-        final candStr = payload['candidate']?.toString();
-        final sdpMid = payload['sdpMid']?.toString();
-        final rawIndex = payload['sdpMLineIndex'];
-        int? sdpMLineIndex;
-        if (rawIndex is int) {
-          sdpMLineIndex = rawIndex;
-        } else if (rawIndex != null) {
-          sdpMLineIndex = int.tryParse(rawIndex.toString());
-        }
-        if (candStr != null) {
-          await _addIceCandidateSafe(RTCIceCandidate(candStr, sdpMid, sdpMLineIndex));
-        }
-      },
-    );
+      _realtimeChannel!.on(
+        RealtimeListenTypes.broadcast,
+        ChannelFilter(event: 'webrtc_ice'),
+        (payload, [ref]) async {
+          final candStr = payload['candidate']?.toString();
+          final sdpMid = payload['sdpMid']?.toString();
+          final rawIndex = payload['sdpMLineIndex'];
+          int? sdpMLineIndex;
+          if (rawIndex is int) {
+            sdpMLineIndex = rawIndex;
+          } else if (rawIndex != null) {
+            sdpMLineIndex = int.tryParse(rawIndex.toString());
+          }
+          if (candStr != null) {
+            await _addIceCandidateSafe(RTCIceCandidate(candStr, sdpMid, sdpMLineIndex));
+          }
+        },
+      );
 
-    await _realtimeChannel!.subscribe();
+      await _realtimeChannel!.subscribe();
+    } catch (e) {
+      debugPrint('Realtime channel setup warning: $e');
+    }
 
     peerConnection?.onIceCandidate = (RTCIceCandidate? candidate) async {
       if (candidate == null || candidate.candidate == null) return;
       try {
         // 1. Instant Realtime Broadcast
-        _realtimeChannel?.sendBroadcast(
-          event: 'webrtc_ice',
-          payload: {
-            'candidate': candidate.candidate,
-            'sdpMid': candidate.sdpMid,
-            'sdpMLineIndex': candidate.sdpMLineIndex,
-          },
-        );
+        try {
+          _realtimeChannel?.send(
+            type: RealtimeListenTypes.broadcast,
+            event: 'webrtc_ice',
+            payload: {
+              'candidate': candidate.candidate,
+              'sdpMid': candidate.sdpMid,
+              'sdpMLineIndex': candidate.sdpMLineIndex,
+            },
+          );
+        } catch (_) {}
 
         // 2. DB Table fallback
         await Supabase.instance.client.from('callee_candidates').insert({
@@ -472,10 +489,13 @@ class Signaling {
     await peerConnection!.setLocalDescription(answer);
 
     // Broadcast answer to caller instantly over Realtime Channel
-    _realtimeChannel?.sendBroadcast(
-      event: 'webrtc_answer',
-      payload: {'type': answer.type, 'sdp': answer.sdp},
-    );
+    try {
+      _realtimeChannel?.send(
+        type: RealtimeListenTypes.broadcast,
+        event: 'webrtc_answer',
+        payload: {'type': answer.type, 'sdp': answer.sdp},
+      );
+    } catch (_) {}
 
     await Supabase.instance.client.from('rooms').update({
       'answer': {'type': answer.type, 'sdp': answer.sdp},
