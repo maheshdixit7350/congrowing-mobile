@@ -10,6 +10,7 @@ typedef IncomingCallCallback = void Function(
     String roomId, String callType, String callerId, String status);
 
 class Signaling {
+  static String? activeCallRoomId;
   RTCPeerConnection? peerConnection;
   MediaStream? localStream;
   MediaStream? remoteStream;
@@ -131,6 +132,7 @@ class Signaling {
       localStream = null;
       remoteStream = null;
       roomId = null;
+      Signaling.activeCallRoomId = null;
       _remoteDescriptionSet = false;
       _pendingCandidates.clear();
     }
@@ -211,6 +213,7 @@ class Signaling {
         .single();
 
     roomId = room['id'].toString();
+    Signaling.activeCallRoomId = roomId;
     peerConnection = await createPeerConnection(configuration);
 
     _registerPeerConnectionListeners();
@@ -316,6 +319,7 @@ class Signaling {
   Future<void> joinRoom(String joinRoomId) async {
     if (!supabaseInitialized) return;
     roomId = joinRoomId;
+    Signaling.activeCallRoomId = joinRoomId;
 
     _remoteDescriptionSet = false;
     _pendingCandidates.clear();

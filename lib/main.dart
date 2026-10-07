@@ -189,7 +189,8 @@ class _ConGrowingAppState extends State<ConGrowingApp>
         if (status == 'ringing') {
           if (_isIncomingCallDialogShowing ||
               _activeIncomingRoomId != null ||
-              _handledRoomIds.contains(roomId)) {
+              _handledRoomIds.contains(roomId) ||
+              Signaling.activeCallRoomId != null) {
             return;
           }
           _activeIncomingRoomId = roomId;
@@ -217,7 +218,9 @@ class _ConGrowingAppState extends State<ConGrowingApp>
 
   void _showIncomingCallDialog(
       BuildContext context, String roomId, String callType, String callerId) {
-    if (_isIncomingCallDialogShowing || _handledRoomIds.contains(roomId)) return;
+    if (_isIncomingCallDialogShowing ||
+        _handledRoomIds.contains(roomId) ||
+        Signaling.activeCallRoomId != null) return;
     _isIncomingCallDialogShowing = true;
     _activeIncomingRoomId = roomId;
 
@@ -311,6 +314,7 @@ class _ConGrowingAppState extends State<ConGrowingApp>
                 TextButton(
                   onPressed: () {
                     _handledRoomIds.add(roomId);
+                    Signaling.activeCallRoomId = roomId;
                     _activeIncomingRoomId = null;
                     _isIncomingCallDialogShowing = false;
                     _incomingCallDialogContext = null;
