@@ -17,6 +17,7 @@ class Signaling {
 
   StreamStateCallback? onAddRemoteStream;
 
+  RealtimeChannel? _realtimeChannel;
   final List<Timer> _activeTimers = [];
   bool _remoteDescriptionSet = false;
   final List<RTCIceCandidate> _pendingCandidates = [];
@@ -25,10 +26,12 @@ class Signaling {
     'iceServers': [
       {
         'urls': [
+          'stun:stun.l.google.com:19302',
           'stun:stun1.l.google.com:19302',
           'stun:stun2.l.google.com:19302',
           'stun:stun3.l.google.com:19302',
           'stun:stun4.l.google.com:19302',
+          'stun:global.stun.twilio.com:3478',
           'stun:stun.relay.metered.ca:80',
         ]
       },
@@ -43,6 +46,7 @@ class Signaling {
         'credential': 'fCBVVCuN/6gVZrFj',
       },
     ],
+    'iceCandidatePoolSize': 10,
     'sdpSemantics': 'unified-plan',
   };
 
@@ -103,6 +107,13 @@ class Signaling {
       }
       _activeTimers.clear();
 
+      if (_realtimeChannel != null && supabaseInitialized) {
+        try {
+          await _realtimeChannel!.unsubscribe();
+        } catch (_) {}
+        _realtimeChannel = null;
+      }
+
       final tracks = localVideo.srcObject?.getTracks() ?? [];
       for (final track in tracks) {
         track.stop();
@@ -136,9 +147,12 @@ class Signaling {
   // ── Flush buffered ICE candidates ─────────────────────────────────────────
 
   Future<void> _flushPendingCandidates() async {
-    for (final candidate in _pendingCandidates) {
+    if (peerConnection == null) return;
+    debugPrint('📡 Flushing ${_pendingCandidates.length} queued ICE candidates...');
+    for (final candidate in List.of(_pendingCandidates)) {
       try {
         await peerConnection?.addCandidate(candidate);
+        debugPrint('📡 Flushed ICE candidate successfully');
       } catch (e) {
         debugPrint('Error adding buffered ICE candidate: $e');
       }
@@ -148,14 +162,30 @@ class Signaling {
 
   /// Adds a candidate, buffering it if remote description isn't set yet.
   Future<void> _addIceCandidateSafe(RTCIceCandidate candidate) async {
-    if (_remoteDescriptionSet && peerConnection != null) {
+    if (_remoteDescriptionSet && peerConnection != null && peerConnection!.remoteDescription != null) {
       try {
         await peerConnection!.addCandidate(candidate);
+        debugPrint('📡 Added WebRTC ICE candidate successfully');
       } catch (e) {
         debugPrint('Error adding ICE candidate: $e');
       }
     } else {
+      debugPrint('📡 Queuing ICE candidate (remote description not ready yet)');
       _pendingCandidates.add(candidate);
+    }
+  }
+
+  // ── Setup Transceivers for 2-Way Audio ─────────────────────────────────────
+
+  Future<void> _setupTransceivers() async {
+    if (peerConnection == null) return;
+    try {
+      final transceivers = await peerConnection!.getTransceivers();
+      for (final tr in transceivers) {
+        await tr.setDirection(TransceiverDirection.SendRecv);
+      }
+    } catch (e) {
+      debugPrint('Transceiver setup warning: $e');
     }
   }
 
@@ -197,9 +227,63 @@ class Signaling {
       peerConnection?.addTrack(track, localStream!);
     });
 
+    await _setupTransceivers();
+
+    // Setup Supabase Realtime Broadcast Channel for 0ms instant signaling
+    _realtimeChannel = Supabase.instance.client.channel('room_$roomId');
+
+    _realtimeChannel!.onBroadcast(
+      event: 'webrtc_answer',
+      callback: (payload) async {
+        if (!_remoteDescriptionSet && peerConnection != null) {
+          debugPrint('🎙️ Received WebRTC answer via Realtime Broadcast!');
+          final sdp = payload['sdp']?.toString();
+          final type = payload['type']?.toString();
+          if (sdp != null && type != null) {
+            final answer = RTCSessionDescription(sdp, type);
+            await peerConnection?.setRemoteDescription(answer);
+            _remoteDescriptionSet = true;
+            await _flushPendingCandidates();
+          }
+        }
+      },
+    );
+
+    _realtimeChannel!.onBroadcast(
+      event: 'webrtc_ice',
+      callback: (payload) async {
+        final candStr = payload['candidate']?.toString();
+        final sdpMid = payload['sdpMid']?.toString();
+        final rawIndex = payload['sdpMLineIndex'];
+        int? sdpMLineIndex;
+        if (rawIndex is int) {
+          sdpMLineIndex = rawIndex;
+        } else if (rawIndex != null) {
+          sdpMLineIndex = int.tryParse(rawIndex.toString());
+        }
+        if (candStr != null) {
+          await _addIceCandidateSafe(RTCIceCandidate(candStr, sdpMid, sdpMLineIndex));
+        }
+      },
+    );
+
+    await _realtimeChannel!.subscribe();
+
+    // ICE Candidate handler for Caller
     peerConnection?.onIceCandidate = (RTCIceCandidate? candidate) async {
       if (candidate == null || candidate.candidate == null) return;
       try {
+        // 1. Instant Realtime Broadcast
+        _realtimeChannel?.sendBroadcastEvent(
+          event: 'webrtc_ice',
+          payload: {
+            'candidate': candidate.candidate,
+            'sdpMid': candidate.sdpMid,
+            'sdpMLineIndex': candidate.sdpMLineIndex,
+          },
+        );
+
+        // 2. DB Table fallback
         await Supabase.instance.client.from('caller_candidates').insert({
           'room_id': roomId,
           'candidate': candidate.candidate,
@@ -211,15 +295,10 @@ class Signaling {
       }
     };
 
-    final offerConstraints = <String, dynamic>{
-      'mandatory': {
-        'OfferToReceiveAudio': 'true',
-        'OfferToReceiveVideo': isVideo ? 'true' : 'false',
-      },
-      'optional': [],
-    };
-
-    final offer = await peerConnection!.createOffer(offerConstraints);
+    final offer = await peerConnection!.createOffer({
+      'offerToReceiveAudio': true,
+      'offerToReceiveVideo': isVideo,
+    });
     await peerConnection!.setLocalDescription(offer);
 
     await Supabase.instance.client.from('rooms').update({
@@ -227,7 +306,7 @@ class Signaling {
       'updated_at': DateTime.now().toIso8601String(),
     }).eq('id', roomId!);
 
-    // Periodic 500ms REST polling for SDP answer from callee
+    // Periodic 500ms REST polling backup for SDP answer from callee
     Timer? answerTimer;
     answerTimer = Timer.periodic(const Duration(milliseconds: 500), (_) async {
       if (_remoteDescriptionSet || peerConnection == null || roomId == null) {
@@ -254,7 +333,7 @@ class Signaling {
     });
     _activeTimers.add(answerTimer);
 
-    // Periodic 500ms REST polling for Callee ICE candidates
+    // Periodic 500ms REST polling backup for Callee ICE candidates
     final addedCalleeCandidates = <String>{};
     Timer? calleeCandidateTimer;
     calleeCandidateTimer = Timer.periodic(const Duration(milliseconds: 500), (_) async {
@@ -312,7 +391,7 @@ class Signaling {
         roomData = res;
         break;
       }
-      await Future.delayed(const Duration(milliseconds: 500));
+      await Future.delayed(const Duration(milliseconds: 300));
     }
 
     if (roomData == null || roomData['offer'] == null) {
@@ -329,9 +408,45 @@ class Signaling {
       peerConnection?.addTrack(track, localStream!);
     });
 
+    await _setupTransceivers();
+
+    // Setup Supabase Realtime Broadcast Channel for 0ms instant signaling
+    _realtimeChannel = Supabase.instance.client.channel('room_$roomId');
+
+    _realtimeChannel!.onBroadcast(
+      event: 'webrtc_ice',
+      callback: (payload) async {
+        final candStr = payload['candidate']?.toString();
+        final sdpMid = payload['sdpMid']?.toString();
+        final rawIndex = payload['sdpMLineIndex'];
+        int? sdpMLineIndex;
+        if (rawIndex is int) {
+          sdpMLineIndex = rawIndex;
+        } else if (rawIndex != null) {
+          sdpMLineIndex = int.tryParse(rawIndex.toString());
+        }
+        if (candStr != null) {
+          await _addIceCandidateSafe(RTCIceCandidate(candStr, sdpMid, sdpMLineIndex));
+        }
+      },
+    );
+
+    await _realtimeChannel!.subscribe();
+
     peerConnection?.onIceCandidate = (RTCIceCandidate? candidate) async {
       if (candidate == null || candidate.candidate == null) return;
       try {
+        // 1. Instant Realtime Broadcast
+        _realtimeChannel?.sendBroadcastEvent(
+          event: 'webrtc_ice',
+          payload: {
+            'candidate': candidate.candidate,
+            'sdpMid': candidate.sdpMid,
+            'sdpMLineIndex': candidate.sdpMLineIndex,
+          },
+        );
+
+        // 2. DB Table fallback
         await Supabase.instance.client.from('callee_candidates').insert({
           'room_id': joinRoomId,
           'candidate': candidate.candidate,
@@ -350,16 +465,17 @@ class Signaling {
     _remoteDescriptionSet = true;
     await _flushPendingCandidates();
 
-    final answerConstraints = <String, dynamic>{
-      'mandatory': {
-        'OfferToReceiveAudio': 'true',
-        'OfferToReceiveVideo': isRoomVideo ? 'true' : 'false',
-      },
-      'optional': [],
-    };
-
-    final answer = await peerConnection!.createAnswer(answerConstraints);
+    final answer = await peerConnection!.createAnswer({
+      'offerToReceiveAudio': true,
+      'offerToReceiveVideo': isRoomVideo,
+    });
     await peerConnection!.setLocalDescription(answer);
+
+    // Broadcast answer to caller instantly over Realtime Channel
+    _realtimeChannel?.sendBroadcastEvent(
+      event: 'webrtc_answer',
+      payload: {'type': answer.type, 'sdp': answer.sdp},
+    );
 
     await Supabase.instance.client.from('rooms').update({
       'answer': {'type': answer.type, 'sdp': answer.sdp},
@@ -367,7 +483,7 @@ class Signaling {
       'updated_at': DateTime.now().toIso8601String(),
     }).eq('id', joinRoomId);
 
-    // Periodic 500ms REST polling for Caller ICE candidates
+    // Periodic 500ms REST polling backup for Caller ICE candidates
     final addedCallerCandidates = <String>{};
     Timer? callerCandidateTimer;
     callerCandidateTimer = Timer.periodic(const Duration(milliseconds: 500), (_) async {
@@ -480,6 +596,7 @@ class Signaling {
       debugPrint('ICE connection state: $state');
     };
     peerConnection?.onTrack = (RTCTrackEvent event) async {
+      debugPrint('🎙️ Remote track received: ${event.track.kind}');
       event.track.enabled = true;
       if (event.streams.isNotEmpty) {
         remoteStream = event.streams[0];
@@ -489,15 +606,22 @@ class Signaling {
       }
       for (final track in remoteStream?.getAudioTracks() ?? []) {
         track.enabled = true;
+        try {
+          Helper.setVolume(1.0, track);
+        } catch (_) {}
       }
       if (remoteStream != null) {
         onAddRemoteStream?.call(remoteStream!);
       }
     };
     peerConnection?.onAddStream = (MediaStream stream) {
+      debugPrint('🎙️ Remote stream added');
       remoteStream = stream;
       for (final track in stream.getAudioTracks()) {
         track.enabled = true;
+        try {
+          Helper.setVolume(1.0, track);
+        } catch (_) {}
       }
       onAddRemoteStream?.call(remoteStream!);
     };
