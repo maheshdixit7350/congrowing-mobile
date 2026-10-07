@@ -162,7 +162,7 @@ class Signaling {
 
   /// Adds a candidate, buffering it if remote description isn't set yet.
   Future<void> _addIceCandidateSafe(RTCIceCandidate candidate) async {
-    if (_remoteDescriptionSet && peerConnection != null && peerConnection!.remoteDescription != null) {
+    if (_remoteDescriptionSet && peerConnection != null) {
       try {
         await peerConnection!.addCandidate(candidate);
         debugPrint('📡 Added WebRTC ICE candidate successfully');
@@ -274,7 +274,7 @@ class Signaling {
       if (candidate == null || candidate.candidate == null) return;
       try {
         // 1. Instant Realtime Broadcast
-        _realtimeChannel?.sendBroadcastEvent(
+        _realtimeChannel?.sendBroadcast(
           event: 'webrtc_ice',
           payload: {
             'candidate': candidate.candidate,
@@ -437,7 +437,7 @@ class Signaling {
       if (candidate == null || candidate.candidate == null) return;
       try {
         // 1. Instant Realtime Broadcast
-        _realtimeChannel?.sendBroadcastEvent(
+        _realtimeChannel?.sendBroadcast(
           event: 'webrtc_ice',
           payload: {
             'candidate': candidate.candidate,
@@ -472,7 +472,7 @@ class Signaling {
     await peerConnection!.setLocalDescription(answer);
 
     // Broadcast answer to caller instantly over Realtime Channel
-    _realtimeChannel?.sendBroadcastEvent(
+    _realtimeChannel?.sendBroadcast(
       event: 'webrtc_answer',
       payload: {'type': answer.type, 'sdp': answer.sdp},
     );
