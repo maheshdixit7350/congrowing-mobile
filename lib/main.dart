@@ -119,6 +119,7 @@ class _ConGrowingAppState extends State<ConGrowingApp>
   final AudioPlayer _incomingRingtonePlayer = AudioPlayer();
   BuildContext? _incomingCallDialogContext;
   bool _isIncomingCallDialogShowing = false;
+  String? _activeIncomingRoomId;
 
   @override
   void initState() {
@@ -184,18 +185,22 @@ class _ConGrowingAppState extends State<ConGrowingApp>
         if (nav == null) return;
 
         if (status == 'ringing') {
-          if (_isIncomingCallDialogShowing || _incomingCallDialogContext != null) {
+          if (_isIncomingCallDialogShowing || _activeIncomingRoomId != null) {
             return;
           }
+          _activeIncomingRoomId = roomId;
           _showIncomingCallDialog(nav.context, roomId, callType, callerId);
         } else if (status == 'ended' || status == 'connected') {
-          if (_incomingCallDialogContext != null) {
-            try {
-              Navigator.of(_incomingCallDialogContext!).pop();
-            } catch (_) {}
-            _incomingCallDialogContext = null;
-            _isIncomingCallDialogShowing = false;
-            AudioHelper.stopPlayer(_incomingRingtonePlayer);
+          if (_activeIncomingRoomId == roomId) {
+            _activeIncomingRoomId = null;
+            if (_incomingCallDialogContext != null) {
+              try {
+                Navigator.of(_incomingCallDialogContext!).pop();
+              } catch (_) {}
+              _incomingCallDialogContext = null;
+              _isIncomingCallDialogShowing = false;
+              AudioHelper.stopPlayer(_incomingRingtonePlayer);
+            }
           }
         }
       },
@@ -206,6 +211,7 @@ class _ConGrowingAppState extends State<ConGrowingApp>
       BuildContext context, String roomId, String callType, String callerId) async {
     if (_isIncomingCallDialogShowing) return;
     _isIncomingCallDialogShowing = true;
+    _activeIncomingRoomId = roomId;
 
     AudioHelper.startLooping(_incomingRingtonePlayer, 'audio/ringing.wav');
 
@@ -217,6 +223,7 @@ class _ConGrowingAppState extends State<ConGrowingApp>
 
     if (!mounted || !context.mounted) {
       _isIncomingCallDialogShowing = false;
+      _activeIncomingRoomId = null;
       AudioHelper.stopPlayer(_incomingRingtonePlayer);
       return;
     }
@@ -271,6 +278,7 @@ class _ConGrowingAppState extends State<ConGrowingApp>
             TextButton(
               onPressed: () {
                 Navigator.pop(ctx);
+                _activeIncomingRoomId = null;
                 _incomingCallDialogContext = null;
                 _isIncomingCallDialogShowing = false;
                 AudioHelper.stopPlayer(_incomingRingtonePlayer);
@@ -295,6 +303,7 @@ class _ConGrowingAppState extends State<ConGrowingApp>
             TextButton(
               onPressed: () {
                 Navigator.pop(ctx);
+                _activeIncomingRoomId = null;
                 _incomingCallDialogContext = null;
                 _isIncomingCallDialogShowing = false;
                 AudioHelper.stopPlayer(_incomingRingtonePlayer);
@@ -327,6 +336,7 @@ class _ConGrowingAppState extends State<ConGrowingApp>
         );
       },
     ).then((_) {
+      _activeIncomingRoomId = null;
       _incomingCallDialogContext = null;
       _isIncomingCallDialogShowing = false;
       AudioHelper.stopPlayer(_incomingRingtonePlayer);
