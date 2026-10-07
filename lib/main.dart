@@ -201,11 +201,6 @@ class _ConGrowingAppState extends State<ConGrowingApp>
             _activeIncomingRoomId = null;
             _isIncomingCallDialogShowing = false;
             AudioHelper.stopPlayer(_incomingRingtonePlayer);
-            try {
-              _incomingRingtonePlayer.setVolume(0.0);
-              _incomingRingtonePlayer.stop();
-              _incomingRingtonePlayer.release();
-            } catch (_) {}
             if (_incomingCallDialogContext != null) {
               try {
                 Navigator.of(_incomingCallDialogContext!).pop();
@@ -292,9 +287,6 @@ class _ConGrowingAppState extends State<ConGrowingApp>
                     _incomingCallDialogContext = null;
                     AudioHelper.stopPlayer(_incomingRingtonePlayer);
                     try {
-                      _incomingRingtonePlayer.stop();
-                    } catch (_) {}
-                    try {
                       Supabase.instance.client.from('rooms').update({
                         'status': 'ended',
                         'updated_at': DateTime.now().toIso8601String(),
@@ -321,9 +313,6 @@ class _ConGrowingAppState extends State<ConGrowingApp>
                     _isIncomingCallDialogShowing = false;
                     _incomingCallDialogContext = null;
                     AudioHelper.stopPlayer(_incomingRingtonePlayer);
-                    try {
-                      _incomingRingtonePlayer.stop();
-                    } catch (_) {}
                     try {
                       Supabase.instance.client.from('rooms').update({
                         'status': 'connected',
@@ -367,9 +356,6 @@ class _ConGrowingAppState extends State<ConGrowingApp>
       _incomingCallDialogContext = null;
       _isIncomingCallDialogShowing = false;
       AudioHelper.stopPlayer(_incomingRingtonePlayer);
-      try {
-        _incomingRingtonePlayer.stop();
-      } catch (_) {}
     });
   }
 

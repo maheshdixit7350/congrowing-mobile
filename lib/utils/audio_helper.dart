@@ -24,8 +24,9 @@ class AudioHelper {
 
   static Future<void> startLooping(AudioPlayer player, String assetPath) async {
     try {
+      await player.stop();
+      await player.setVolume(1.0);
       await player.setReleaseMode(ReleaseMode.loop);
-      await player.setVolume(0.7);
       await player.play(AssetSource(assetPath));
     } catch (_) {}
   }
@@ -34,7 +35,6 @@ class AudioHelper {
     try {
       await player.setVolume(0.0);
       await player.stop();
-      await player.release();
     } catch (_) {}
   }
 }
