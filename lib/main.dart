@@ -196,13 +196,15 @@ class _ConGrowingAppState extends State<ConGrowingApp>
           _activeIncomingRoomId = roomId;
           _showIncomingCallDialog(nav.context, roomId, callType, callerId);
         } else if (status == 'ended' || status == 'connected' || status == 'accepted') {
-          if (_activeIncomingRoomId == roomId) {
+          _handledRoomIds.add(roomId);
+          if (_activeIncomingRoomId == roomId || _isIncomingCallDialogShowing) {
             _activeIncomingRoomId = null;
-            _handledRoomIds.add(roomId);
             _isIncomingCallDialogShowing = false;
             AudioHelper.stopPlayer(_incomingRingtonePlayer);
             try {
+              _incomingRingtonePlayer.setVolume(0.0);
               _incomingRingtonePlayer.stop();
+              _incomingRingtonePlayer.release();
             } catch (_) {}
             if (_incomingCallDialogContext != null) {
               try {

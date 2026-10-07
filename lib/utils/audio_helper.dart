@@ -32,7 +32,9 @@ class AudioHelper {
 
   static Future<void> stopPlayer(AudioPlayer player) async {
     try {
+      await player.setVolume(0.0);
       await player.stop();
+      await player.release();
     } catch (_) {}
   }
 }

@@ -99,7 +99,9 @@ class _VoiceCallScreenState extends State<VoiceCallScreen>
       signaling.onAddRemoteStream = (stream) async {
         _remoteRenderer.srcObject = stream;
         try {
+          await _audioPlayer.setVolume(0.0);
           await _audioPlayer.stop();
+          await _audioPlayer.release();
         } catch (_) {}
 
         try {
@@ -163,8 +165,19 @@ class _VoiceCallScreenState extends State<VoiceCallScreen>
       final activeRoomId = signaling.roomId;
       if (activeRoomId != null && activeRoomId.isNotEmpty) {
         _roomStatusSub = signaling.listenToRoomStatus(activeRoomId, (status) {
+          if ((status == 'connected' || status == 'accepted') && mounted) {
+            try {
+              _audioPlayer.setVolume(0.0);
+              _audioPlayer.stop();
+              _audioPlayer.release();
+            } catch (_) {}
+          }
           if (status == 'ended' && mounted) {
-            _audioPlayer.stop();
+            try {
+              _audioPlayer.setVolume(0.0);
+              _audioPlayer.stop();
+              _audioPlayer.release();
+            } catch (_) {}
             if (Navigator.canPop(context)) {
               Navigator.pop(context);
             }
