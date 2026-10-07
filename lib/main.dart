@@ -193,16 +193,20 @@ class _ConGrowingAppState extends State<ConGrowingApp>
           }
           _activeIncomingRoomId = roomId;
           _showIncomingCallDialog(nav.context, roomId, callType, callerId);
-        } else if (status == 'ended' || status == 'connected') {
+        } else if (status == 'ended' || status == 'connected' || status == 'accepted') {
           if (_activeIncomingRoomId == roomId) {
             _activeIncomingRoomId = null;
+            _handledRoomIds.add(roomId);
+            _isIncomingCallDialogShowing = false;
+            AudioHelper.stopPlayer(_incomingRingtonePlayer);
+            try {
+              _incomingRingtonePlayer.stop();
+            } catch (_) {}
             if (_incomingCallDialogContext != null) {
               try {
                 Navigator.of(_incomingCallDialogContext!).pop();
               } catch (_) {}
               _incomingCallDialogContext = null;
-              _isIncomingCallDialogShowing = false;
-              AudioHelper.stopPlayer(_incomingRingtonePlayer);
             }
           }
         }
@@ -211,133 +215,143 @@ class _ConGrowingAppState extends State<ConGrowingApp>
   }
 
   void _showIncomingCallDialog(
-      BuildContext context, String roomId, String callType, String callerId) async {
+      BuildContext context, String roomId, String callType, String callerId) {
     if (_isIncomingCallDialogShowing || _handledRoomIds.contains(roomId)) return;
     _isIncomingCallDialogShowing = true;
     _activeIncomingRoomId = roomId;
 
     AudioHelper.startLooping(_incomingRingtonePlayer, 'audio/ringing.wav');
 
-    final callerUser = callerId.isNotEmpty
-        ? await UserService.instance.getUserById(callerId)
-        : null;
-    final callerName = callerUser?.name ?? 'Someone';
-    final callerAvatar = callerUser?.avatarUrl;
-
-    if (!mounted || !context.mounted || _handledRoomIds.contains(roomId)) {
-      _isIncomingCallDialogShowing = false;
-      _activeIncomingRoomId = null;
-      AudioHelper.stopPlayer(_incomingRingtonePlayer);
-      return;
-    }
-
     showDialog(
       context: context,
       barrierDismissible: false,
       builder: (ctx) {
         _incomingCallDialogContext = ctx;
-        return AlertDialog(
-          backgroundColor: const Color(0xFF1E293B),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: callType == 'video'
-                      ? const Color(0xFF6C63FF).withOpacity(0.2)
-                      : const Color(0xFF10B981).withOpacity(0.2),
-                ),
-                child: Icon(
-                  callType == 'video'
-                      ? Icons.videocam_rounded
-                      : Icons.call_rounded,
-                  color: callType == 'video'
-                      ? const Color(0xFF6C63FF)
-                      : const Color(0xFF10B981),
-                  size: 40,
-                ),
+        return FutureBuilder<UserModel?>(
+          future: callerId.isNotEmpty
+              ? UserService.instance.getUserById(callerId)
+              : Future.value(null),
+          builder: (context, snapshot) {
+            final callerUser = snapshot.data;
+            final callerName = callerUser?.name ?? 'Someone';
+            final callerAvatar = callerUser?.avatarUrl;
+
+            return AlertDialog(
+              backgroundColor: const Color(0xFF1E293B),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: callType == 'video'
+                          ? const Color(0xFF6C63FF).withOpacity(0.2)
+                          : const Color(0xFF10B981).withOpacity(0.2),
+                    ),
+                    child: Icon(
+                      callType == 'video'
+                          ? Icons.videocam_rounded
+                          : Icons.call_rounded,
+                      color: callType == 'video'
+                          ? const Color(0xFF6C63FF)
+                          : const Color(0xFF10B981),
+                      size: 40,
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+                  Text(
+                    'Incoming ${callType == 'video' ? 'Video' : 'Voice'} Call',
+                    style: GoogleFonts.outfit(
+                        color: Colors.white,
+                        fontSize: 20,
+                        fontWeight: FontWeight.w700),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    '$callerName is calling you',
+                    textAlign: TextAlign.center,
+                    style: GoogleFonts.inter(color: Colors.white70, fontSize: 14),
+                  ),
+                ],
               ),
-              const SizedBox(height: 20),
-              Text(
-                'Incoming ${callType == 'video' ? 'Video' : 'Voice'} Call',
-                style: GoogleFonts.outfit(
-                    color: Colors.white,
-                    fontSize: 20,
-                    fontWeight: FontWeight.w700),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                '$callerName is calling you',
-                textAlign: TextAlign.center,
-                style: GoogleFonts.inter(color: Colors.white70, fontSize: 14),
-              ),
-            ],
-          ),
-          actionsAlignment: MainAxisAlignment.spaceEvenly,
-          actions: [
-            TextButton(
-              onPressed: () {
-                _handledRoomIds.add(roomId);
-                Navigator.pop(ctx);
-                _activeIncomingRoomId = null;
-                _incomingCallDialogContext = null;
-                _isIncomingCallDialogShowing = false;
-                AudioHelper.stopPlayer(_incomingRingtonePlayer);
-                try {
-                  Supabase.instance.client.from('rooms').update({
-                    'status': 'ended',
-                    'updated_at': DateTime.now().toIso8601String(),
-                  }).eq('id', roomId).then((_) {});
-                } catch (_) {}
-              },
-              style: TextButton.styleFrom(
-                backgroundColor: Colors.redAccent.withOpacity(0.15),
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(14)),
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 28, vertical: 12),
-              ),
-              child: Text('Decline',
-                  style: GoogleFonts.inter(
-                      color: Colors.redAccent, fontWeight: FontWeight.w700)),
-            ),
-            TextButton(
-              onPressed: () {
-                _handledRoomIds.add(roomId);
-                Navigator.pop(ctx);
-                _activeIncomingRoomId = null;
-                _incomingCallDialogContext = null;
-                _isIncomingCallDialogShowing = false;
-                AudioHelper.stopPlayer(_incomingRingtonePlayer);
-                final route =
-                    callType == 'video' ? '/video-call' : '/voice-call';
-                ConGrowingApp.navigatorKey.currentState?.pushNamed(
-                  route,
-                  arguments: {
-                    'roomId': roomId,
-                    'isCaller': false,
-                    'name': callerName,
-                    'avatarUrl': callerAvatar,
-                    'otherUid': callerId,
+              actionsAlignment: MainAxisAlignment.spaceEvenly,
+              actions: [
+                TextButton(
+                  onPressed: () {
+                    _handledRoomIds.add(roomId);
+                    _activeIncomingRoomId = null;
+                    _isIncomingCallDialogShowing = false;
+                    _incomingCallDialogContext = null;
+                    AudioHelper.stopPlayer(_incomingRingtonePlayer);
+                    try {
+                      _incomingRingtonePlayer.stop();
+                    } catch (_) {}
+                    try {
+                      Supabase.instance.client.from('rooms').update({
+                        'status': 'ended',
+                        'updated_at': DateTime.now().toIso8601String(),
+                      }).eq('id', roomId).then((_) {});
+                    } catch (_) {}
+                    Navigator.pop(ctx);
                   },
-                );
-              },
-              style: TextButton.styleFrom(
-                backgroundColor: const Color(0xFF10B981).withOpacity(0.15),
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(14)),
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 28, vertical: 12),
-              ),
-              child: Text('Accept',
-                  style: GoogleFonts.inter(
-                      color: const Color(0xFF10B981),
-                      fontWeight: FontWeight.w700)),
-            ),
-          ],
+                  style: TextButton.styleFrom(
+                    backgroundColor: Colors.redAccent.withOpacity(0.15),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(14)),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 28, vertical: 12),
+                  ),
+                  child: Text('Decline',
+                      style: GoogleFonts.inter(
+                          color: Colors.redAccent, fontWeight: FontWeight.w700)),
+                ),
+                TextButton(
+                  onPressed: () {
+                    _handledRoomIds.add(roomId);
+                    _activeIncomingRoomId = null;
+                    _isIncomingCallDialogShowing = false;
+                    _incomingCallDialogContext = null;
+                    AudioHelper.stopPlayer(_incomingRingtonePlayer);
+                    try {
+                      _incomingRingtonePlayer.stop();
+                    } catch (_) {}
+                    try {
+                      Supabase.instance.client.from('rooms').update({
+                        'status': 'connected',
+                        'updated_at': DateTime.now().toIso8601String(),
+                      }).eq('id', roomId).then((_) {});
+                    } catch (_) {}
+                    Navigator.pop(ctx);
+                    final route =
+                        callType == 'video' ? '/video-call' : '/voice-call';
+                    ConGrowingApp.navigatorKey.currentState?.pushNamed(
+                      route,
+                      arguments: {
+                        'roomId': roomId,
+                        'isCaller': false,
+                        'name': callerName,
+                        'avatarUrl': callerAvatar,
+                        'otherUid': callerId,
+                      },
+                    );
+                  },
+                  style: TextButton.styleFrom(
+                    backgroundColor: const Color(0xFF10B981).withOpacity(0.15),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(14)),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 28, vertical: 12),
+                  ),
+                  child: Text('Accept',
+                      style: GoogleFonts.inter(
+                          color: const Color(0xFF10B981),
+                          fontWeight: FontWeight.w700)),
+                ),
+              ],
+            );
+          },
         );
       },
     ).then((_) {
@@ -346,6 +360,9 @@ class _ConGrowingAppState extends State<ConGrowingApp>
       _incomingCallDialogContext = null;
       _isIncomingCallDialogShowing = false;
       AudioHelper.stopPlayer(_incomingRingtonePlayer);
+      try {
+        _incomingRingtonePlayer.stop();
+      } catch (_) {}
     });
   }
 
