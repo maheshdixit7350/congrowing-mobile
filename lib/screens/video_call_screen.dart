@@ -46,7 +46,6 @@ class _VideoCallScreenState extends State<VideoCallScreen>
   String _durationText = '00:00';
 
   // Subscriptions
-  StreamSubscription? _incomingCallSub;
   StreamSubscription? _roomStatusSub;
 
   @override
@@ -194,8 +193,6 @@ class _VideoCallScreenState extends State<VideoCallScreen>
   void dispose() {
     _radarController.dispose();
     _audioPlayer.dispose();
-    _statsTimer?.cancel();
-    _incomingCallSub?.cancel();
     _roomStatusSub?.cancel();
     if (_callDuration.isRunning) {
       _callDuration.stop();

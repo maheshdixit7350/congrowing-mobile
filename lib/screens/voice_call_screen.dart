@@ -197,7 +197,6 @@ class _VoiceCallScreenState extends State<VoiceCallScreen>
     _radarController.dispose();
     _pulseController.dispose();
     _audioPlayer.dispose();
-    _statsTimer?.cancel();
     _roomStatusSub?.cancel();
     if (_callDuration.isRunning) {
       _callDuration.stop();
