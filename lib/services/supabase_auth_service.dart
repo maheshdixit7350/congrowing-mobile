@@ -15,6 +15,7 @@ class SupabaseAuthService {
 
 
   final GoogleSignIn _googleSignIn = GoogleSignIn(
+    scopes: ['email', 'profile'],
     clientId: kIsWeb ? _webClientId : null,
     serverClientId: kIsWeb ? null : _webClientId,
   );

@@ -524,6 +524,11 @@ class Signaling {
           Helper.setVolume(1.0, track);
         } catch (_) {}
       }
+      try {
+        if (!kIsWeb) {
+          Helper.setSpeakerphoneOn(true);
+        }
+      } catch (_) {}
       if (remoteStream != null) {
         onAddRemoteStream?.call(remoteStream!);
       }
@@ -537,6 +542,11 @@ class Signaling {
           Helper.setVolume(1.0, track);
         } catch (_) {}
       }
+      try {
+        if (!kIsWeb) {
+          Helper.setSpeakerphoneOn(true);
+        }
+      } catch (_) {}
       onAddRemoteStream?.call(remoteStream!);
     };
   }
