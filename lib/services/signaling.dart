@@ -67,6 +67,17 @@ class Signaling {
   Future<void> openUserMedia(
       RTCVideoRenderer localVideo, RTCVideoRenderer remoteVideo,
       {bool isVideo = true}) async {
+    if (localStream != null) {
+      try {
+        for (final track in localStream!.getTracks()) {
+          track.enabled = false;
+          track.stop();
+        }
+        await localStream!.dispose();
+      } catch (_) {}
+      localStream = null;
+    }
+
     if (!kIsWeb) {
       try {
         await Permission.microphone.request();
@@ -102,6 +113,7 @@ class Signaling {
 
       localVideo.srcObject = stream;
       localStream = stream;
+      debugPrint('[Signaling] Fresh hardware media stream acquired.');
     } catch (e) {
       debugPrint('Error acquiring media stream (mic/camera): $e');
       try {
@@ -132,17 +144,17 @@ class Signaling {
       }
       _activeTimers.clear();
 
-      for (final track in localStream?.getAudioTracks() ?? []) {
-        track.stop();
+      for (final track in localStream?.getTracks() ?? []) {
+        try {
+          track.enabled = false;
+          track.stop();
+        } catch (_) {}
       }
-      for (final track in remoteStream?.getAudioTracks() ?? []) {
-        track.stop();
-      }
-      for (final track in localStream?.getVideoTracks() ?? []) {
-        track.stop();
-      }
-      for (final track in remoteStream?.getVideoTracks() ?? []) {
-        track.stop();
+      for (final track in remoteStream?.getTracks() ?? []) {
+        try {
+          track.enabled = false;
+          track.stop();
+        } catch (_) {}
       }
 
       if (localVideo != null) {
@@ -156,14 +168,12 @@ class Signaling {
         } catch (_) {}
       }
 
-      localStream?.dispose();
-      remoteStream?.dispose();
-
-      if (!kIsWeb) {
-        try {
-          await Helper.setSpeakerphoneOn(false);
-        } catch (_) {}
-      }
+      try {
+        await localStream?.dispose();
+      } catch (_) {}
+      try {
+        await remoteStream?.dispose();
+      } catch (_) {}
 
       if (roomId != null && supabaseInitialized) {
         final currentRoomId = roomId!;
@@ -187,7 +197,8 @@ class Signaling {
       debugPrint('Error during hangup: $e');
     } finally {
       try {
-        peerConnection?.close();
+        await peerConnection?.close();
+        await peerConnection?.dispose();
       } catch (_) {}
       peerConnection = null;
       localStream = null;
@@ -196,6 +207,7 @@ class Signaling {
       Signaling.activeCallRoomId = null;
       _remoteDescriptionSet = false;
       _pendingCandidates.clear();
+      debugPrint('[Signaling] PeerConnection and media tracks completely disposed.');
     }
   }
 
@@ -290,6 +302,15 @@ class Signaling {
 
     roomId = room['id'].toString();
     Signaling.activeCallRoomId = roomId;
+
+    if (peerConnection != null) {
+      try {
+        await peerConnection?.close();
+        await peerConnection?.dispose();
+      } catch (_) {}
+      peerConnection = null;
+    }
+
     peerConnection = await createPeerConnection(configuration);
 
     _registerPeerConnectionListeners();
@@ -421,6 +442,14 @@ class Signaling {
     }
 
     final isRoomVideo = roomData['type'] == 'video';
+
+    if (peerConnection != null) {
+      try {
+        await peerConnection?.close();
+        await peerConnection?.dispose();
+      } catch (_) {}
+      peerConnection = null;
+    }
 
     peerConnection = await createPeerConnection(configuration);
     _registerPeerConnectionListeners();
