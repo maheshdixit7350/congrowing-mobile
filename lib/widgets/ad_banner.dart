@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
 
@@ -22,6 +23,7 @@ class _AdBannerState extends State<AdBanner> {
   }
 
   void _loadAd() {
+    if (kIsWeb) return;
     _bannerAd = BannerAd(
       adUnitId: adUnitId,
       request: const AdRequest(),

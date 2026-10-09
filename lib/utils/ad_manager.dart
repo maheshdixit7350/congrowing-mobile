@@ -1,5 +1,4 @@
 import 'package:google_mobile_ads/google_mobile_ads.dart';
-import 'dart:io';
 import 'package:flutter/foundation.dart';
 
 class AdManager {
@@ -14,7 +13,7 @@ class AdManager {
 
   // ── Interstitial Ads ────────────────────────────────────────────────────
   static void loadInterstitialAd() {
-    if (kIsWeb || (!Platform.isAndroid && !Platform.isIOS)) return;
+    if (kIsWeb || (defaultTargetPlatform != TargetPlatform.android && defaultTargetPlatform != TargetPlatform.iOS)) return;
     InterstitialAd.load(
       adUnitId: interstitialAdUnitId,
       request: const AdRequest(),

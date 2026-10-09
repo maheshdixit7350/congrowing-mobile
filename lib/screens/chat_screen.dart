@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 import 'dart:ui';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -1729,7 +1730,7 @@ class _ImageBubbleContent extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final isLocal = imageUrl.startsWith('file://');
+    final isLocal = !kIsWeb && imageUrl.startsWith('file://');
     final path = isLocal ? Uri.parse(imageUrl).toFilePath() : imageUrl;
 
     return GestureDetector(
