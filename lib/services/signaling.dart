@@ -235,7 +235,7 @@ class Signaling {
               'updated_at': DateTime.now().toIso8601String(),
             })
             .eq('caller_id', uid)
-            .in_('status', ['waiting', 'ringing']);
+            .inFilter('status', ['waiting', 'ringing']);
       } catch (e) {
         debugPrint('Warning cleaning stale caller rooms: $e');
       }
