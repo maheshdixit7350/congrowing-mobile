@@ -84,6 +84,13 @@ class Signaling {
         track.enabled = true;
       }
 
+      if (!kIsWeb) {
+        try {
+          Helper.setMicrophoneMute(false);
+          await Helper.setSpeakerphoneOn(true);
+        } catch (_) {}
+      }
+
       localVideo.srcObject = stream;
       localStream = stream;
     } catch (e) {
@@ -526,6 +533,7 @@ class Signaling {
       }
       try {
         if (!kIsWeb) {
+          Helper.setMicrophoneMute(false);
           Helper.setSpeakerphoneOn(true);
         }
       } catch (_) {}
@@ -544,6 +552,7 @@ class Signaling {
       }
       try {
         if (!kIsWeb) {
+          Helper.setMicrophoneMute(false);
           Helper.setSpeakerphoneOn(true);
         }
       } catch (_) {}

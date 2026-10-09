@@ -101,13 +101,17 @@ class _VoiceCallScreenState extends State<VoiceCallScreen>
         try {
           await _audioPlayer.setVolume(0.0);
           await _audioPlayer.stop();
-          await _audioPlayer.release();
         } catch (_) {}
 
-        try {
-          Helper.setSpeakerphoneOn(true);
-        } catch (e) {
-          debugPrint('Audio output setup error: $e');
+        await Future.delayed(const Duration(milliseconds: 200));
+
+        if (!kIsWeb) {
+          try {
+            Helper.setMicrophoneMute(false);
+            await Helper.setSpeakerphoneOn(true);
+          } catch (e) {
+            debugPrint('Audio output setup error: $e');
+          }
         }
 
         for (final track in stream.getAudioTracks()) {
@@ -312,18 +316,19 @@ class _VoiceCallScreenState extends State<VoiceCallScreen>
           ),
 
           // Active media renderer for audio routing
-          Positioned(
-            top: 0,
-            left: 0,
-            child: SizedBox(
-              width: 1,
-              height: 1,
-              child: RTCVideoView(
-                _remoteRenderer,
-                objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
+          if (!kIsWeb)
+            Positioned(
+              top: 0,
+              left: 0,
+              child: SizedBox(
+                width: 1,
+                height: 1,
+                child: RTCVideoView(
+                  _remoteRenderer,
+                  objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
+                ),
               ),
             ),
-          ),
         ],
       ),
     ),

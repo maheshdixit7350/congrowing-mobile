@@ -95,13 +95,17 @@ class _VideoCallScreenState extends State<VideoCallScreen>
         try {
           await _audioPlayer.setVolume(0.0);
           await _audioPlayer.stop();
-          await _audioPlayer.release();
         } catch (_) {}
 
-        try {
-          Helper.setSpeakerphoneOn(true);
-        } catch (e) {
-          debugPrint('Audio output setup error: $e');
+        await Future.delayed(const Duration(milliseconds: 200));
+
+        if (!kIsWeb) {
+          try {
+            Helper.setMicrophoneMute(false);
+            await Helper.setSpeakerphoneOn(true);
+          } catch (e) {
+            debugPrint('Audio output setup error: $e');
+          }
         }
 
         for (final track in stream.getAudioTracks()) {
