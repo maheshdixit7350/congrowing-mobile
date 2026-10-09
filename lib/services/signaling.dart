@@ -33,9 +33,19 @@ class Signaling {
           'stun:stun2.l.google.com:19302',
           'stun:stun3.l.google.com:19302',
           'stun:stun4.l.google.com:19302',
-          'stun:global.stun.twilio.com:3478',
-          'stun:stun.relay.metered.ca:80',
+          'stun:openrelay.metered.ca:80',
+          'stun:openrelay.metered.ca:443',
         ]
+      },
+      {
+        'urls': [
+          'turn:openrelay.metered.ca:80',
+          'turn:openrelay.metered.ca:443',
+          'turn:openrelay.metered.ca:443?transport=tcp',
+          'turns:openrelay.metered.ca:443?transport=tcp',
+        ],
+        'username': 'openrelay',
+        'credential': 'openrelay',
       },
       {
         'urls': [
@@ -572,16 +582,22 @@ class Signaling {
 
   void _registerPeerConnectionListeners() {
     peerConnection?.onIceGatheringState = (RTCIceGatheringState state) {
-      debugPrint('ICE gathering state: $state');
+      debugPrint('[Signaling] ICE gathering state: $state');
     };
     peerConnection?.onConnectionState = (RTCPeerConnectionState state) {
-      debugPrint('Peer connection state: $state');
+      debugPrint('[Signaling] Peer connection state: $state');
     };
     peerConnection?.onSignalingState = (RTCSignalingState state) {
-      debugPrint('Signaling state: $state');
+      debugPrint('[Signaling] Signaling state: $state');
     };
     peerConnection?.onIceConnectionState = (RTCIceConnectionState state) {
-      debugPrint('ICE connection state: $state');
+      debugPrint('[Signaling] ICE connection state: $state');
+      if (state == RTCIceConnectionState.RTCIceConnectionStateFailed) {
+        debugPrint('⚠️ [Signaling] ICE connection failed. Restarting ICE...');
+        try {
+          peerConnection?.restartIce();
+        } catch (_) {}
+      }
     };
     peerConnection?.onTrack = (RTCTrackEvent event) async {
       debugPrint('🎙️ Remote track received: ${event.track.kind}');
