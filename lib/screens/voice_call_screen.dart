@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:ui';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -107,7 +108,9 @@ class _VoiceCallScreenState extends State<VoiceCallScreen>
 
         if (!kIsWeb) {
           try {
-            Helper.setMicrophoneMute(false);
+            for (final track in signaling.localStream?.getAudioTracks() ?? []) {
+              Helper.setMicrophoneMute(false, track);
+            }
             await Helper.setSpeakerphoneOn(true);
           } catch (e) {
             debugPrint('Audio output setup error: $e');
@@ -231,6 +234,11 @@ class _VoiceCallScreenState extends State<VoiceCallScreen>
     try {
       signaling.localStream?.getAudioTracks().forEach((track) {
         track.enabled = !_audioMuted;
+        if (!kIsWeb) {
+          try {
+            Helper.setMicrophoneMute(_audioMuted, track);
+          } catch (_) {}
+        }
       });
       signaling.remoteStream?.getAudioTracks().forEach((track) {
         track.enabled = true;
