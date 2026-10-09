@@ -175,6 +175,11 @@ class _ConGrowingAppState extends State<ConGrowingApp>
 
     if (state == AppLifecycleState.resumed) {
       unawaited(UserService.instance.setOnlineStatus(true));
+      if (ConGrowingApp.navigatorKey.currentState?.canPop() == false) {
+        _activeIncomingRoomId = null;
+        _isIncomingCallDialogShowing = false;
+        Signaling.activeCallRoomId = null;
+      }
     } else if (state == AppLifecycleState.paused ||
         state == AppLifecycleState.detached) {
       unawaited(UserService.instance.setOnlineStatus(false));

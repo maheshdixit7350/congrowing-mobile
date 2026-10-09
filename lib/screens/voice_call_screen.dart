@@ -49,6 +49,7 @@ class _VoiceCallScreenState extends State<VoiceCallScreen>
 
   // Subscriptions
   StreamSubscription? _roomStatusSub;
+  Timer? _callingTimeoutTimer;
 
   @override
   void initState() {
@@ -125,6 +126,7 @@ class _VoiceCallScreenState extends State<VoiceCallScreen>
         }
 
         if (mounted) {
+          _callingTimeoutTimer?.cancel();
           setState(() => _connecting = false);
           _radarController.stop();
           _callDuration.start();
@@ -143,6 +145,19 @@ class _VoiceCallScreenState extends State<VoiceCallScreen>
         } catch (e) {
           debugPrint('Calling audio failed: $e');
         }
+
+        _callingTimeoutTimer = Timer(const Duration(seconds: 35), () {
+          if (mounted && _connecting) {
+            _audioPlayer.stop();
+            try {
+              signaling.hangUp(_localRenderer);
+            } catch (_) {}
+            setState(() {
+              _connecting = false;
+              _errorMsg = 'No answer from user.';
+            });
+          }
+        });
       }
 
       if (_isCaller) {
@@ -214,6 +229,7 @@ class _VoiceCallScreenState extends State<VoiceCallScreen>
 
   @override
   void dispose() {
+    _callingTimeoutTimer?.cancel();
     _radarController.dispose();
     _pulseController.dispose();
     _audioPlayer.dispose();

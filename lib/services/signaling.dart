@@ -137,15 +137,29 @@ class Signaling {
       remoteStream?.dispose();
 
       if (roomId != null && supabaseInitialized) {
+        final currentRoomId = roomId!;
         await Supabase.instance.client.from('rooms').update({
           'status': 'ended',
           'updated_at': DateTime.now().toIso8601String(),
-        }).eq('id', roomId!);
+        }).eq('id', currentRoomId);
+
+        try {
+          await Supabase.instance.client
+              .from('caller_candidates')
+              .delete()
+              .eq('room_id', currentRoomId);
+          await Supabase.instance.client
+              .from('callee_candidates')
+              .delete()
+              .eq('room_id', currentRoomId);
+        } catch (_) {}
       }
     } catch (e) {
       debugPrint('Error during hangup: $e');
     } finally {
-      peerConnection?.close();
+      try {
+        peerConnection?.close();
+      } catch (_) {}
       peerConnection = null;
       localStream = null;
       remoteStream = null;
@@ -211,6 +225,21 @@ class Signaling {
     _pendingCandidates.clear();
 
     final uid = SupabaseAuthService.instance.currentUser?.id;
+
+    if (uid != null) {
+      try {
+        await Supabase.instance.client
+            .from('rooms')
+            .update({
+              'status': 'ended',
+              'updated_at': DateTime.now().toIso8601String(),
+            })
+            .eq('caller_id', uid)
+            .in_('status', ['waiting', 'ringing']);
+      } catch (e) {
+        debugPrint('Warning cleaning stale caller rooms: $e');
+      }
+    }
 
     final insertPayload = <String, dynamic>{
       'type': isVideo ? 'video' : 'voice',
@@ -450,10 +479,15 @@ class Signaling {
     Timer? timer = Timer.periodic(const Duration(seconds: 1), (_) async {
       if (!supabaseInitialized) return;
       try {
+        final thirtyFiveSecsAgo = DateTime.now()
+            .subtract(const Duration(seconds: 35))
+            .toIso8601String();
+
         final data = await Supabase.instance.client
             .from('rooms')
             .select()
             .eq('callee_id', myUid)
+            .gte('created_at', thirtyFiveSecsAgo)
             .order('created_at', ascending: false)
             .limit(5);
 
@@ -464,6 +498,18 @@ class Signaling {
           final callerId = row['caller_id'] as String? ?? '';
           onIncomingCall(rid, callType, callerId, status);
         }
+
+        try {
+          await Supabase.instance.client
+              .from('rooms')
+              .update({
+                'status': 'ended',
+                'updated_at': DateTime.now().toIso8601String(),
+              })
+              .eq('callee_id', myUid)
+              .lt('created_at', thirtyFiveSecsAgo)
+              .eq('status', 'ringing');
+        } catch (_) {}
       } catch (_) {}
     });
 
