@@ -228,6 +228,7 @@ class _VideoCallScreenState extends State<VideoCallScreen>
   void dispose() {
     _callingTimeoutTimer?.cancel();
     _radarController.dispose();
+    _audioPlayer.stop();
     _audioPlayer.dispose();
     _roomStatusSub?.cancel();
     if (_callDuration.isRunning) {
@@ -235,7 +236,7 @@ class _VideoCallScreenState extends State<VideoCallScreen>
       _durationTimer?.cancel();
     }
     try {
-      signaling.hangUp(_localRenderer);
+      signaling.hangUp(_localRenderer, _remoteRenderer);
     } catch (_) {}
     _localRenderer.dispose();
     _remoteRenderer.dispose();
@@ -246,11 +247,6 @@ class _VideoCallScreenState extends State<VideoCallScreen>
     try {
       signaling.localStream?.getAudioTracks().forEach((track) {
         track.enabled = !_audioMuted;
-        if (!kIsWeb) {
-          try {
-            Helper.setMicrophoneMute(_audioMuted, track);
-          } catch (_) {}
-        }
       });
       signaling.remoteStream?.getAudioTracks().forEach((track) {
         track.enabled = true;
@@ -258,9 +254,11 @@ class _VideoCallScreenState extends State<VideoCallScreen>
           Helper.setVolume(1.0, track);
         } catch (_) {}
       });
-      try {
-        Helper.setSpeakerphoneOn(true);
-      } catch (_) {}
+      if (!kIsWeb) {
+        try {
+          Helper.setSpeakerphoneOn(true);
+        } catch (_) {}
+      }
     } catch (_) {}
   }
 
@@ -283,7 +281,7 @@ class _VideoCallScreenState extends State<VideoCallScreen>
       _durationTimer?.cancel();
     }
     try {
-      signaling.hangUp(_localRenderer);
+      signaling.hangUp(_localRenderer, _remoteRenderer);
     } catch (_) {}
 
     AdManager.showInterstitialAd(() {

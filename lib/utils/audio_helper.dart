@@ -4,11 +4,23 @@ class AudioHelper {
   static final AudioPlayer _typingPlayer = AudioPlayer();
   static final AudioPlayer _msgPlayer = AudioPlayer();
 
+  static const _ringtoneContext = AudioContext(
+    android: AudioContextAndroid(
+      isSelfManaged: false,
+      stayAwake: false,
+      contentType: AndroidContentType.music,
+      usageType: AndroidUsageType.media,
+      audioFocus: AndroidAudioFocus.gainTransientMayDuck,
+    ),
+  );
+
   // Static player for typing to avoid garbage collection and lag
   static Future<void> playTyping() async {
     try {
-      // Seek to beginning and play if already playing, or just play
       await _typingPlayer.stop();
+      try {
+        await _typingPlayer.setAudioContext(_ringtoneContext);
+      } catch (_) {}
       await _typingPlayer.setVolume(0.35);
       await _typingPlayer.play(AssetSource('audio/typing.wav'));
     } catch (_) {}
@@ -17,6 +29,9 @@ class AudioHelper {
   static Future<void> playMessageReceived() async {
     try {
       await _msgPlayer.stop();
+      try {
+        await _msgPlayer.setAudioContext(_ringtoneContext);
+      } catch (_) {}
       await _msgPlayer.setVolume(0.8);
       await _msgPlayer.play(AssetSource('audio/message.wav'));
     } catch (_) {}
@@ -25,7 +40,10 @@ class AudioHelper {
   static Future<void> startLooping(AudioPlayer player, String assetPath) async {
     try {
       await player.stop();
-      await player.setVolume(1.0);
+      try {
+        await player.setAudioContext(_ringtoneContext);
+      } catch (_) {}
+      await player.setVolume(0.8);
       await player.setReleaseMode(ReleaseMode.loop);
       await player.play(AssetSource(assetPath));
     } catch (_) {}

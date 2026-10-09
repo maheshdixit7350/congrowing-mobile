@@ -116,7 +116,7 @@ class Signaling {
 
   // ── Hang up ────────────────────────────────────────────────────────────────
 
-  Future<void> hangUp(RTCVideoRenderer localVideo) async {
+  Future<void> hangUp(RTCVideoRenderer? localVideo, [RTCVideoRenderer? remoteVideo]) async {
     try {
       for (final timer in _activeTimers) {
         try {
@@ -125,16 +125,43 @@ class Signaling {
       }
       _activeTimers.clear();
 
-      final tracks = localVideo.srcObject?.getTracks() ?? [];
-      for (final track in tracks) {
+      for (final track in localStream?.getAudioTracks() ?? []) {
+        if (!kIsWeb) {
+          try {
+            Helper.setMicrophoneMute(false, track);
+          } catch (_) {}
+        }
+        track.stop();
+      }
+      for (final track in remoteStream?.getAudioTracks() ?? []) {
+        track.stop();
+      }
+      for (final track in localStream?.getVideoTracks() ?? []) {
+        track.stop();
+      }
+      for (final track in remoteStream?.getVideoTracks() ?? []) {
         track.stop();
       }
 
-      localStream?.getTracks().forEach((track) => track.stop());
-      remoteStream?.getTracks().forEach((track) => track.stop());
+      if (localVideo != null) {
+        try {
+          localVideo.srcObject = null;
+        } catch (_) {}
+      }
+      if (remoteVideo != null) {
+        try {
+          remoteVideo.srcObject = null;
+        } catch (_) {}
+      }
 
       localStream?.dispose();
       remoteStream?.dispose();
+
+      if (!kIsWeb) {
+        try {
+          await Helper.setSpeakerphoneOn(false);
+        } catch (_) {}
+      }
 
       if (roomId != null && supabaseInitialized) {
         final currentRoomId = roomId!;
