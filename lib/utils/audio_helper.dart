@@ -6,7 +6,6 @@ class AudioHelper {
 
   static const _ringtoneContext = AudioContext(
     android: AudioContextAndroid(
-      isSelfManaged: false,
       stayAwake: false,
       contentType: AndroidContentType.music,
       usageType: AndroidUsageType.media,
