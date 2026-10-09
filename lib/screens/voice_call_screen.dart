@@ -107,11 +107,12 @@ class _VoiceCallScreenState extends State<VoiceCallScreen>
 
         await Future.delayed(const Duration(milliseconds: 200));
 
+        for (final track in signaling.localStream?.getAudioTracks() ?? []) {
+          track.enabled = true;
+        }
+
         if (!kIsWeb) {
           try {
-            for (final track in signaling.localStream?.getAudioTracks() ?? []) {
-              Helper.setMicrophoneMute(false, track);
-            }
             await Helper.setSpeakerphoneOn(true);
           } catch (e) {
             debugPrint('Audio output setup error: $e');
@@ -343,11 +344,14 @@ class _VoiceCallScreenState extends State<VoiceCallScreen>
               top: 0,
               left: 0,
               child: SizedBox(
-                width: 1,
-                height: 1,
-                child: RTCVideoView(
-                  _remoteRenderer,
-                  objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
+                width: 100,
+                height: 100,
+                child: Opacity(
+                  opacity: 0.01,
+                  child: RTCVideoView(
+                    _remoteRenderer,
+                    objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
+                  ),
                 ),
               ),
             ),

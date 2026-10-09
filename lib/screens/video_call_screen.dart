@@ -101,11 +101,12 @@ class _VideoCallScreenState extends State<VideoCallScreen>
 
         await Future.delayed(const Duration(milliseconds: 200));
 
+        for (final track in signaling.localStream?.getAudioTracks() ?? []) {
+          track.enabled = true;
+        }
+
         if (!kIsWeb) {
           try {
-            for (final track in signaling.localStream?.getAudioTracks() ?? []) {
-              Helper.setMicrophoneMute(false, track);
-            }
             await Helper.setSpeakerphoneOn(true);
           } catch (e) {
             debugPrint('Audio output setup error: $e');

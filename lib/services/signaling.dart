@@ -86,9 +86,6 @@ class Signaling {
 
       if (!kIsWeb) {
         try {
-          for (final track in stream.getAudioTracks()) {
-            Helper.setMicrophoneMute(false, track);
-          }
           await Helper.setSpeakerphoneOn(true);
         } catch (_) {}
       }
@@ -126,11 +123,6 @@ class Signaling {
       _activeTimers.clear();
 
       for (final track in localStream?.getAudioTracks() ?? []) {
-        if (!kIsWeb) {
-          try {
-            Helper.setMicrophoneMute(false, track);
-          } catch (_) {}
-        }
         track.stop();
       }
       for (final track in remoteStream?.getAudioTracks() ?? []) {
@@ -609,7 +601,7 @@ class Signaling {
       try {
         if (!kIsWeb) {
           for (final track in localStream?.getAudioTracks() ?? []) {
-            Helper.setMicrophoneMute(false, track);
+            track.enabled = true;
           }
           Helper.setSpeakerphoneOn(true);
         }
@@ -630,7 +622,7 @@ class Signaling {
       try {
         if (!kIsWeb) {
           for (final track in localStream?.getAudioTracks() ?? []) {
-            Helper.setMicrophoneMute(false, track);
+            track.enabled = true;
           }
           Helper.setSpeakerphoneOn(true);
         }
