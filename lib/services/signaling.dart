@@ -616,6 +616,7 @@ class Signaling {
         return;
       }
       if (settingAnswer) {
+        debugPrint('[ANSWER_APPLY_IN_PROGRESS]');
         return;
       }
       try {
