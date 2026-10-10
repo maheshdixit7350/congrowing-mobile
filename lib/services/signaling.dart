@@ -49,7 +49,7 @@ class Signaling {
     if (forceRelayOnly) {
       debugPrint('[RELAY_ONLY_MODE_ENABLED] PeerConnection configured with iceTransportPolicy: relay');
     }
-    return {
+    final config = <String, dynamic>{
       'iceServers': [
         {
           'urls': [
@@ -101,12 +101,12 @@ class Signaling {
       'rtcpMuxPolicy': 'require',
       'sdpSemantics': 'unified-plan',
     };
-    final iceServers = cfg['iceServers'] as List;
+    final iceServers = config['iceServers'] as List;
     for (int i = 0; i < iceServers.length; i++) {
       final s = iceServers[i] as Map<String, dynamic>;
       debugPrint('[TURN_SERVER_ATTEMPT] index=$i urls=${s["urls"]} username=${s["username"] ?? "none"}');
     }
-    return cfg;
+    return config;
   }
 
   // ── Media ──────────────────────────────────────────────────────────────────
