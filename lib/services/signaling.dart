@@ -58,29 +58,42 @@ class Signaling {
             'stun:stun2.l.google.com:19302',
             'stun:stun3.l.google.com:19302',
             'stun:stun4.l.google.com:19302',
-            'stun:openrelay.metered.ca:80',
-            'stun:openrelay.metered.ca:443',
           ]
         },
         {
-          'urls': [
-            'turn:openrelay.metered.ca:80',
-            'turn:openrelay.metered.ca:443',
-            'turn:openrelay.metered.ca:443?transport=tcp',
-            'turns:openrelay.metered.ca:443?transport=tcp',
-          ],
+          'urls': ['turn:global.relay.metered.ca:80'],
+          'username': 'e05c4a4a1347fef5fedaa1c5',
+          'credential': 'fCBVVCuN/6gVZrFj',
+        },
+        {
+          'urls': ['turn:global.relay.metered.ca:80?transport=tcp'],
+          'username': 'e05c4a4a1347fef5fedaa1c5',
+          'credential': 'fCBVVCuN/6gVZrFj',
+        },
+        {
+          'urls': ['turn:global.relay.metered.ca:443'],
+          'username': 'e05c4a4a1347fef5fedaa1c5',
+          'credential': 'fCBVVCuN/6gVZrFj',
+        },
+        {
+          'urls': ['turn:global.relay.metered.ca:443?transport=tcp'],
+          'username': 'e05c4a4a1347fef5fedaa1c5',
+          'credential': 'fCBVVCuN/6gVZrFj',
+        },
+        {
+          'urls': ['turn:openrelay.metered.ca:80'],
           'username': 'openrelay',
           'credential': 'openrelay',
         },
         {
-          'urls': [
-            'turn:global.relay.metered.ca:80',
-            'turn:global.relay.metered.ca:80?transport=tcp',
-            'turn:global.relay.metered.ca:443',
-            'turns:global.relay.metered.ca:443?transport=tcp',
-          ],
-          'username': 'e05c4a4a1347fef5fedaa1c5',
-          'credential': 'fCBVVCuN/6gVZrFj',
+          'urls': ['turn:openrelay.metered.ca:443'],
+          'username': 'openrelay',
+          'credential': 'openrelay',
+        },
+        {
+          'urls': ['turn:openrelay.metered.ca:443?transport=tcp'],
+          'username': 'openrelay',
+          'credential': 'openrelay',
         },
       ],
       'iceCandidatePoolSize': 10,
