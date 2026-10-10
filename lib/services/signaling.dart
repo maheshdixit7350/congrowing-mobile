@@ -348,14 +348,12 @@ class Signaling {
         await Supabase.instance.client.from('caller_candidates').insert({
           'room_id': roomId,
           'candidate': candidate.candidate,
-          'sdpMid': candidate.sdpMid ?? '0',
-          'sdpMLineIndex': candidate.sdpMLineIndex ?? 0,
           'sdpmid': candidate.sdpMid ?? '0',
           'sdpmlineindex': candidate.sdpMLineIndex ?? 0,
         });
-        debugPrint('[ICE_STORED_DB] caller candidate inserted to DB successfully');
+        debugPrint('[ICE_STORED_DB] caller candidate inserted to DB successfully: ${candidate.candidate}');
       } catch (e) {
-        debugPrint('Error sending caller ICE candidate: $e');
+        debugPrint('⚠️ [ICE_STORE_ERROR] Error inserting caller ICE candidate to DB: $e');
       }
     };
 
@@ -414,8 +412,8 @@ class Signaling {
           final candidateStr = candMap['candidate'] as String?;
           if (candidateStr != null && !addedCalleeCandidates.contains(candidateStr)) {
             addedCalleeCandidates.add(candidateStr);
-            final sdpMid = (candMap['sdpMid'] ?? candMap['sdpmid'] ?? '0').toString();
-            final rawIndex = candMap['sdpMLineIndex'] ?? candMap['sdpmlineindex'];
+            final sdpMid = (candMap['sdpmid'] ?? candMap['sdpMid'] ?? '0').toString();
+            final rawIndex = candMap['sdpmlineindex'] ?? candMap['sdpMLineIndex'];
             int sdpMLineIndex = 0;
             if (rawIndex is int) {
               sdpMLineIndex = rawIndex;
@@ -499,14 +497,12 @@ class Signaling {
         await Supabase.instance.client.from('callee_candidates').insert({
           'room_id': joinRoomId,
           'candidate': candidate.candidate,
-          'sdpMid': candidate.sdpMid ?? '0',
-          'sdpMLineIndex': candidate.sdpMLineIndex ?? 0,
           'sdpmid': candidate.sdpMid ?? '0',
           'sdpmlineindex': candidate.sdpMLineIndex ?? 0,
         });
-        debugPrint('[ICE_STORED_DB] callee candidate inserted to DB successfully');
+        debugPrint('[ICE_STORED_DB] callee candidate inserted to DB successfully: ${candidate.candidate}');
       } catch (e) {
-        debugPrint('Error sending callee ICE candidate: $e');
+        debugPrint('⚠️ [ICE_STORE_ERROR] Error inserting callee ICE candidate to DB: $e');
       }
     };
 
@@ -546,8 +542,8 @@ class Signaling {
           final candidateStr = candMap['candidate'] as String?;
           if (candidateStr != null && !addedCallerCandidates.contains(candidateStr)) {
             addedCallerCandidates.add(candidateStr);
-            final sdpMid = (candMap['sdpMid'] ?? candMap['sdpmid'] ?? '0').toString();
-            final rawIndex = candMap['sdpMLineIndex'] ?? candMap['sdpmlineindex'];
+            final sdpMid = (candMap['sdpmid'] ?? candMap['sdpMid'] ?? '0').toString();
+            final rawIndex = candMap['sdpmlineindex'] ?? candMap['sdpMLineIndex'];
             int sdpMLineIndex = 0;
             if (rawIndex is int) {
               sdpMLineIndex = rawIndex;
