@@ -103,12 +103,16 @@ class Signaling {
 
       for (final track in stream.getAudioTracks()) {
         track.enabled = true;
+        debugPrint('[MEDIA] stream=${stream.id} localStreamHash=${stream.hashCode} track=${track.id} label=${track.label} enabled=${track.enabled} readyState=${track.readyState}');
       }
 
       if (!kIsWeb) {
         try {
           await Helper.setSpeakerphoneOn(true);
-        } catch (_) {}
+          debugPrint('[AUDIO_ROUTE] Helper.setSpeakerphoneOn(true) executed');
+        } catch (e) {
+          debugPrint('[AUDIO_ROUTE] Helper.setSpeakerphoneOn error: $e');
+        }
       }
 
       localVideo.srcObject = stream;
@@ -123,6 +127,7 @@ class Signaling {
         });
         for (final track in stream.getAudioTracks()) {
           track.enabled = true;
+          debugPrint('[MEDIA_FALLBACK] stream=${stream.id} track=${track.id} enabled=${track.enabled} readyState=${track.readyState}');
         }
         localVideo.srcObject = stream;
         localStream = stream;
@@ -146,14 +151,18 @@ class Signaling {
 
       for (final track in localStream?.getTracks() ?? []) {
         try {
+          debugPrint('[HANGUP_BEFORE] local track=${track.id} readyState=${track.readyState} enabled=${track.enabled}');
           track.enabled = false;
           track.stop();
+          debugPrint('[HANGUP_AFTER] local track=${track.id} readyState=${track.readyState} enabled=${track.enabled}');
         } catch (_) {}
       }
       for (final track in remoteStream?.getTracks() ?? []) {
         try {
+          debugPrint('[HANGUP_BEFORE] remote track=${track.id} readyState=${track.readyState} enabled=${track.enabled}');
           track.enabled = false;
           track.stop();
+          debugPrint('[HANGUP_AFTER] remote track=${track.id} readyState=${track.readyState} enabled=${track.enabled}');
         } catch (_) {}
       }
 
@@ -321,6 +330,14 @@ class Signaling {
 
     await _setupTransceivers();
 
+    try {
+      final senders = await peerConnection?.getSenders() ?? [];
+      for (final s in senders) {
+        final tr = s.track;
+        debugPrint('[CREATE_ROOM] pc=${peerConnection.hashCode} senders=${senders.length} audioTrack=${tr?.id} readyState=${tr?.readyState} enabled=${tr?.enabled}');
+      }
+    } catch (_) {}
+
     // ICE Candidate handler for Caller
     peerConnection?.onIceCandidate = (RTCIceCandidate? candidate) async {
       if (candidate == null || candidate.candidate == null) return;
@@ -459,6 +476,14 @@ class Signaling {
     });
 
     await _setupTransceivers();
+
+    try {
+      final receivers = await peerConnection?.getReceivers() ?? [];
+      for (final r in receivers) {
+        final tr = r.track;
+        debugPrint('[JOIN_ROOM] pc=${peerConnection.hashCode} receivers=${receivers.length} audioTrack=${tr?.id} readyState=${tr?.readyState} enabled=${tr?.enabled}');
+      }
+    } catch (_) {}
 
     peerConnection?.onIceCandidate = (RTCIceCandidate? candidate) async {
       if (candidate == null || candidate.candidate == null) return;
@@ -611,16 +636,22 @@ class Signaling {
 
   void _registerPeerConnectionListeners() {
     peerConnection?.onIceGatheringState = (RTCIceGatheringState state) {
-      debugPrint('[Signaling] ICE gathering state: $state');
+      debugPrint('[STATE] IceGatheringState: $state');
     };
     peerConnection?.onConnectionState = (RTCPeerConnectionState state) {
-      debugPrint('[Signaling] Peer connection state: $state');
+      debugPrint('[STATE] ConnectionState: $state');
+      if (state == RTCPeerConnectionState.RTCPeerConnectionStateConnected) {
+        _startStatsLogging();
+      }
     };
     peerConnection?.onSignalingState = (RTCSignalingState state) {
-      debugPrint('[Signaling] Signaling state: $state');
+      debugPrint('[STATE] SignalingState: $state');
     };
     peerConnection?.onIceConnectionState = (RTCIceConnectionState state) {
-      debugPrint('[Signaling] ICE connection state: $state');
+      debugPrint('[STATE] IceConnectionState: $state');
+      if (state == RTCIceConnectionState.RTCIceConnectionStateConnected) {
+        _startStatsLogging();
+      }
       if (state == RTCIceConnectionState.RTCIceConnectionStateFailed) {
         debugPrint('⚠️ [Signaling] ICE connection failed. Restarting ICE...');
         try {
@@ -629,7 +660,7 @@ class Signaling {
       }
     };
     peerConnection?.onTrack = (RTCTrackEvent event) async {
-      debugPrint('🎙️ Remote track received: ${event.track.kind}');
+      debugPrint('[REMOTE_TRACK] id=${event.track.id} kind=${event.track.kind} enabled=${event.track.enabled} readyState=${event.track.readyState} stream=${event.streams.isNotEmpty ? event.streams[0].id : "none"}');
       event.track.enabled = true;
       if (event.streams.isNotEmpty) {
         remoteStream = event.streams[0];
@@ -656,7 +687,7 @@ class Signaling {
       }
     };
     peerConnection?.onAddStream = (MediaStream stream) {
-      debugPrint('🎙️ Remote stream added');
+      debugPrint('[REMOTE_STREAM_ADDED] streamId=${stream.id} tracks=${stream.getAudioTracks().length}');
       remoteStream = stream;
       for (final track in stream.getAudioTracks()) {
         track.enabled = true;
@@ -674,6 +705,45 @@ class Signaling {
       } catch (_) {}
       onAddRemoteStream?.call(remoteStream!);
     };
+  }
+
+  void _startStatsLogging() {
+    Timer? statsTimer;
+    statsTimer = Timer.periodic(const Duration(seconds: 3), (_) async {
+      if (peerConnection == null) {
+        statsTimer?.cancel();
+        return;
+      }
+      try {
+        final stats = await peerConnection?.getStats();
+        if (stats != null) {
+          int packetsSent = 0;
+          int packetsReceived = 0;
+          int bytesSent = 0;
+          int bytesReceived = 0;
+          num currentRTT = 0;
+
+          for (final report in stats) {
+            final values = report.values;
+            if (report.type == 'outbound-rtp' && (values['kind'] == 'audio' || values['mediaType'] == 'audio')) {
+              packetsSent = values['packetsSent'] ?? 0;
+              bytesSent = values['bytesSent'] ?? 0;
+            }
+            if (report.type == 'inbound-rtp' && (values['kind'] == 'audio' || values['mediaType'] == 'audio')) {
+              packetsReceived = values['packetsReceived'] ?? 0;
+              bytesReceived = values['bytesReceived'] ?? 0;
+            }
+            if (report.type == 'candidate-pair' && values['currentRoundTripTime'] != null) {
+              currentRTT = values['currentRoundTripTime'];
+            }
+          }
+          debugPrint('[WEBRTC_STATS] packetsSent=$packetsSent packetsReceived=$packetsReceived bytesSent=$bytesSent bytesReceived=$bytesReceived audioRTT=$currentRTT');
+        }
+      } catch (e) {
+        debugPrint('[WEBRTC_STATS] Error fetching stats: $e');
+      }
+    });
+    _activeTimers.add(statsTimer);
   }
 
   // Keep backward compat

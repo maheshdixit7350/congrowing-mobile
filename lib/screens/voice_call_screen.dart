@@ -142,6 +142,7 @@ class _VoiceCallScreenState extends State<VoiceCallScreen>
       if (_isCaller) {
         await _audioPlayer.setReleaseMode(ReleaseMode.loop);
         try {
+          debugPrint('[AUDIOPLAYER] play calling.wav');
           await _audioPlayer.play(AssetSource('audio/calling.wav'));
         } catch (e) {
           debugPrint('Calling audio failed: $e');
@@ -149,6 +150,7 @@ class _VoiceCallScreenState extends State<VoiceCallScreen>
 
         _callingTimeoutTimer = Timer(const Duration(seconds: 35), () {
           if (mounted && _connecting) {
+            debugPrint('[AUDIOPLAYER] stop calling.wav (timeout)');
             _audioPlayer.stop();
             try {
               signaling.hangUp(_localRenderer);
@@ -190,6 +192,7 @@ class _VoiceCallScreenState extends State<VoiceCallScreen>
         _roomStatusSub = signaling.listenToRoomStatus(activeRoomId, (status) {
           if ((status == 'connected' || status == 'accepted') && mounted) {
             try {
+              debugPrint('[AUDIOPLAYER] stop & release calling.wav');
               _audioPlayer.setVolume(0.0);
               _audioPlayer.stop();
               _audioPlayer.release();
@@ -197,6 +200,7 @@ class _VoiceCallScreenState extends State<VoiceCallScreen>
           }
           if (status == 'ended' && mounted) {
             try {
+              debugPrint('[AUDIOPLAYER] stop & release calling.wav on ended');
               _audioPlayer.setVolume(0.0);
               _audioPlayer.stop();
               _audioPlayer.release();
@@ -217,6 +221,8 @@ class _VoiceCallScreenState extends State<VoiceCallScreen>
     }
   }
 
+  Timer? _micCheckTimer;
+
   void _startDurationTimer() {
     _durationTimer = Timer.periodic(const Duration(seconds: 1), (_) {
       if (mounted) {
@@ -226,13 +232,23 @@ class _VoiceCallScreenState extends State<VoiceCallScreen>
         setState(() => _durationText = '$m:$s');
       }
     });
+
+    _micCheckTimer = Timer.periodic(const Duration(seconds: 5), (_) {
+      if (mounted) {
+        for (final tr in signaling.localStream?.getAudioTracks() ?? []) {
+          debugPrint('[MIC_CHECK] trackId=${tr.id} enabled=${tr.enabled} readyState=${tr.readyState}');
+        }
+      }
+    });
   }
 
   @override
   void dispose() {
+    _micCheckTimer?.cancel();
     _callingTimeoutTimer?.cancel();
     _radarController.dispose();
     _pulseController.dispose();
+    debugPrint('[AUDIOPLAYER] dispose calling.wav player');
     _audioPlayer.stop();
     _audioPlayer.dispose();
     _roomStatusSub?.cancel();
