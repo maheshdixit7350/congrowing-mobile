@@ -611,8 +611,11 @@ class Signaling {
     bool settingAnswer = false;
 
     answerTimer = Timer.periodic(const Duration(milliseconds: 300), (_) async {
-      if (_remoteDescriptionSet || settingAnswer || peerConnection == null || roomId == null) {
+      if (_remoteDescriptionSet || peerConnection == null || roomId == null) {
         answerTimer?.cancel();
+        return;
+      }
+      if (settingAnswer) {
         return;
       }
       try {
