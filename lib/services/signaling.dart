@@ -14,7 +14,7 @@ typedef IncomingCallCallback = void Function(
 
 class Signaling {
   static String? activeCallRoomId;
-  static bool forceRelayOnly = false;
+  static bool forceRelayOnly = true;
 
   RTCPeerConnection? peerConnection;
   MediaStream? localStream;
@@ -57,11 +57,26 @@ class Signaling {
     return 'unknown';
   }
 
+  String _buildCandidateKey(String candidate, String? sdpMid, dynamic rawSdpMLineIndex) {
+    final mid = (sdpMid != null && sdpMid.isNotEmpty) ? sdpMid : '0';
+    final lineIdx = rawSdpMLineIndex?.toString() ?? '0';
+    return '${candidate.trim()}_${mid}_$lineIdx';
+  }
+
   void _printFinalIceDiagnosticSummary() {
     debugPrint('[FINAL_ICE_DIAGNOSTICS]');
     debugPrint('host=$_localHostCandidateCount');
     debugPrint('srflx=$_localSrflxCandidateCount');
     debugPrint('relay=$_localRelayCandidateCount');
+
+    if (_localRelayCandidateCount == 0) {
+      debugPrint('[TURN_ALLOCATION_FAILED]');
+      debugPrint('host=$_localHostCandidateCount');
+      debugPrint('srflx=$_localSrflxCandidateCount');
+      debugPrint('relay=$_localRelayCandidateCount');
+    } else {
+      debugPrint('[TURN_ALLOCATION_SUCCESS]');
+    }
 
     if (_localHostCandidateCount > 0 && _localRelayCandidateCount == 0) {
       debugPrint('[TURN_SERVER_OR_CREDENTIAL_FAILURE]');
@@ -71,10 +86,6 @@ class Signaling {
         _localSrflxCandidateCount == 0 &&
         _localRelayCandidateCount == 0) {
       debugPrint('[ICE_GATHERING_COMPLETELY_FAILED]');
-    }
-
-    if (_localRelayCandidateCount > 0) {
-      debugPrint('[TURN_ALLOCATION_SUCCESS]');
     }
   }
 
@@ -576,15 +587,6 @@ class Signaling {
         return;
       }
       try {
-        final currentSigState = await peerConnection?.getSignalingState();
-        if (_remoteDescriptionSet || currentSigState == RTCSignalingState.RTCSignalingStateStable) {
-          debugPrint(
-              '[ANSWER_ALREADY_APPLIED] Signaling state is already stable ($currentSigState). Skipping duplicate answer.');
-          _remoteDescriptionSet = true;
-          answerTimer?.cancel();
-          return;
-        }
-
         final res = await Supabase.instance.client
             .from('rooms')
             .select('answer, updated_at')
@@ -626,10 +628,10 @@ class Signaling {
     });
     _activeTimers.add(answerTimer);
 
-    // Fast 300ms REST polling for Callee ICE candidates
+    // 1000ms REST polling for Callee ICE candidates
     final addedCalleeCandidates = <String>{};
     Timer? calleeCandidateTimer;
-    calleeCandidateTimer = Timer.periodic(const Duration(milliseconds: 300), (_) async {
+    calleeCandidateTimer = Timer.periodic(const Duration(milliseconds: 1000), (_) async {
       if (roomId == null || peerConnection == null) {
         calleeCandidateTimer?.cancel();
         return;
@@ -644,14 +646,17 @@ class Signaling {
           final candidateStr = candMap['candidate'] as String?;
           if (candidateStr != null) {
             final candType = _getCandidateType(candidateStr);
+            final sdpMid = candMap['sdpmid'] ?? candMap['sdpMid'];
+            final sdpMLineIndex = candMap['sdpmlineindex'] ?? candMap['sdpMLineIndex'];
+            final candKey = _buildCandidateKey(candidateStr, sdpMid?.toString(), sdpMLineIndex);
             debugPrint('[CANDIDATE_DB_RETRIEVED]\ntype=$candType\ncandidate=$candidateStr');
 
-            if (!addedCalleeCandidates.contains(candidateStr)) {
-              addedCalleeCandidates.add(candidateStr);
+            if (!addedCalleeCandidates.contains(candKey)) {
+              addedCalleeCandidates.add(candKey);
               final candObj = _validateAndCreateCandidate(
                 candidateStr,
-                candMap['sdpmid'] ?? candMap['sdpMid'],
-                candMap['sdpmlineindex'] ?? candMap['sdpMLineIndex'],
+                sdpMid,
+                sdpMLineIndex,
               );
               if (candObj != null) {
                 await _addIceCandidateSafe(candObj);
@@ -822,7 +827,7 @@ class Signaling {
 
     final addedCallerCandidates = <String>{};
     Timer? callerCandidateTimer;
-    callerCandidateTimer = Timer.periodic(const Duration(milliseconds: 300), (_) async {
+    callerCandidateTimer = Timer.periodic(const Duration(milliseconds: 1000), (_) async {
       if (roomId == null || peerConnection == null) {
         callerCandidateTimer?.cancel();
         return;
@@ -837,15 +842,18 @@ class Signaling {
           final candidateStr = candMap['candidate'] as String?;
           if (candidateStr != null) {
             final candType = _getCandidateType(candidateStr);
+            final sdpMid = candMap['sdpmid'] ?? candMap['sdpMid'];
+            final sdpMLineIndex = candMap['sdpmlineindex'] ?? candMap['sdpMLineIndex'];
+            final candKey = _buildCandidateKey(candidateStr, sdpMid?.toString(), sdpMLineIndex);
             debugPrint('[CANDIDATE_DB_RETRIEVED]\ntype=$candType\ncandidate=$candidateStr');
 
-            if (!addedCallerCandidates.contains(candidateStr)) {
-              addedCallerCandidates.add(candidateStr);
+            if (!addedCallerCandidates.contains(candKey)) {
+              addedCallerCandidates.add(candKey);
 
               final candObj = _validateAndCreateCandidate(
                 candidateStr,
-                candMap['sdpmid'] ?? candMap['sdpMid'],
-                candMap['sdpmlineindex'] ?? candMap['sdpMLineIndex'],
+                sdpMid,
+                sdpMLineIndex,
               );
               if (candObj != null) {
                 await _addIceCandidateSafe(candObj);
@@ -977,6 +985,10 @@ class Signaling {
   // ── Peer Connection Listeners ─────────────────────────────────────────────
 
   void _registerPeerConnectionListeners() {
+    peerConnection?.onIceCandidateError = (event) {
+      debugPrint('[ICE_CANDIDATE_ERROR] $event');
+    };
+
     peerConnection?.onIceGatheringState = (RTCIceGatheringState state) {
       debugPrint('[ICE_GATHERING_STATE] $state');
       debugPrint('[STATE] IceGatheringState: $state');
@@ -1027,6 +1039,20 @@ class Signaling {
     peerConnection?.onIceConnectionState = (RTCIceConnectionState state) async {
       debugPrint('[ICE_CONNECTION_STATE] $state');
       debugPrint('[STATE] IceConnectionState: $state');
+
+      if (state == RTCIceConnectionState.RTCIceConnectionStateChecking) {
+        debugPrint('[ICE_CHECKING]');
+      }
+      if (state == RTCIceConnectionState.RTCIceConnectionStateConnected) {
+        debugPrint('[ICE_CONNECTED]');
+      }
+      if (state == RTCIceConnectionState.RTCIceConnectionStateCompleted) {
+        debugPrint('[ICE_COMPLETED]');
+      }
+      if (state == RTCIceConnectionState.RTCIceConnectionStateFailed) {
+        debugPrint('[ICE_FAILED]');
+      }
+
       if (state == RTCIceConnectionState.RTCIceConnectionStateConnected ||
           state == RTCIceConnectionState.RTCIceConnectionStateCompleted) {
         _startStatsLogging();
@@ -1045,10 +1071,16 @@ class Signaling {
         try {
           final stats = await peerConnection?.getStats();
           for (final report in stats ?? []) {
-            if ((report.type == 'candidate-pair' || report.type == 'googCandidatePair') &&
-                (report.values['state'] == 'succeeded' || report.values['nominated'] == true)) {
+            final rType = report.type.toLowerCase();
+            if (rType == 'candidate-pair' || rType == 'googcandidatepair') {
+              final pairState = report.values['state']?.toString() ?? 'unknown';
+              final isNominated = report.values['nominated'] == true;
+              final localId = report.values['localCandidateId']?.toString() ?? '';
+              final remoteId = report.values['remoteCandidateId']?.toString() ?? '';
+              final rtt = report.values['currentRoundTripTime'] ?? 0;
+
               debugPrint(
-                  '[ICE_SELECTED_PAIR] localCandidateId=${report.values['localCandidateId']} remoteCandidateId=${report.values['remoteCandidateId']} RTT=${report.values['currentRoundTripTime']} state=${report.values['state']}');
+                  '[ICE_SELECTED_PAIR]\nstate=$pairState\nnominated=$isNominated\nlocalCandidateId=$localId\nremoteCandidateId=$remoteId\ncurrentRoundTripTime=$rtt');
             }
           }
         } catch (_) {}
@@ -1056,8 +1088,7 @@ class Signaling {
       if (state == RTCIceConnectionState.RTCIceConnectionStateFailed) {
         debugPrint('⚠️ [CALL_STABILITY_FAILURE] ICE entered failed state after ${_stabilitySeconds}s of connection monitoring!');
         _stopStabilityTimer();
-        debugPrint('⚠️ [ICE] Connection failed! Initiating full ICE restart with renegotiation...');
-        await _restartIceWithRenegotiation();
+        debugPrint('[ICE_FAILED_RESTART_DISABLED]');
       }
     };
 
