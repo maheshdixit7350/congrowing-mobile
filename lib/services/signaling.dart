@@ -101,6 +101,12 @@ class Signaling {
       'rtcpMuxPolicy': 'require',
       'sdpSemantics': 'unified-plan',
     };
+    final iceServers = cfg['iceServers'] as List;
+    for (int i = 0; i < iceServers.length; i++) {
+      final s = iceServers[i] as Map<String, dynamic>;
+      debugPrint('[TURN_SERVER_ATTEMPT] index=$i urls=${s["urls"]} username=${s["username"] ?? "none"}');
+    }
+    return cfg;
   }
 
   // ── Media ──────────────────────────────────────────────────────────────────
@@ -850,7 +856,10 @@ class Signaling {
             '[CANDIDATE_SUMMARY] host=$_localHostCandidateCount srflx=$_localSrflxCandidateCount relay=$_localRelayCandidateCount');
         if (_localRelayCandidateCount == 0) {
           debugPrint(
-              '⚠️ [NO_RELAY_CANDIDATES_GENERATED] Zero TURN relay candidates generated during gathering!');
+              '⚠️ [CANDIDATE_SUMMARY_ALERT] ZERO TURN relay candidates generated during gathering! TURN allocation failed or server unreachable.');
+        } else {
+          debugPrint(
+              '✅ [TURN_RELAY_GENERATED] TURN relay candidates generated successfully! relayCount=$_localRelayCandidateCount');
         }
       }
     };
@@ -1037,6 +1046,8 @@ class Signaling {
 
               if (isNominated && (state == 'succeeded' || isWritable)) {
                 debugPrint(
+                    '[ACTIVE_ICE_PAIR] local=$localType remote=$remoteType state=$state rtt=$pairRtt nominated=$isNominated');
+                debugPrint(
                     '[ICE_SELECTED_PAIR] localCandidateType=$localType remoteCandidateType=$remoteType candidatePairState=$state rtt=$pairRtt');
                 currentRTT = pairRtt;
               }
@@ -1060,7 +1071,7 @@ class Signaling {
               _noRtpFlowSeconds += 3;
               if (_noRtpFlowSeconds >= 10) {
                 debugPrint(
-                    '[NO_RTP_FLOW] Warning: Remote tracks present but RTP packets remained zero for ${_noRtpFlowSeconds}s! bytesReceived=$bytesReceived');
+                    '⚠️ [MEDIA_FLOW_FAILURE] Remote track present, but 0 RTP bytes received for ${_noRtpFlowSeconds}s! bytesReceived=$bytesReceived audioPacketsReceived=$audioPacketsReceived');
               }
             }
           }
