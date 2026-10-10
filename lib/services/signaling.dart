@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -109,93 +110,20 @@ class Signaling {
 
     final config = <String, dynamic>{
       'iceServers': [
-        // Standard Google STUN
-        {
-          'urls': [
-            'stun:stun.l.google.com:19302',
-            'stun:stun1.l.google.com:19302',
-            'stun:stun2.l.google.com:19302',
-            'stun:stun3.l.google.com:19302',
-            'stun:stun4.l.google.com:19302',
-          ]
-        },
-        // Metered TURN - Standard Port 3478 (UDP & TCP)
-        {
-          'urls': [
-            'turn:global.relay.metered.ca:3478',
-            'turn:global.relay.metered.ca:3478?transport=tcp',
-          ],
-          'url': 'turn:global.relay.metered.ca:3478',
-          'username': 'e05c4a4a1347fef5fedaa1c5',
-          'credential': 'fCBVVCuN/6gVZrFj',
-          'password': 'fCBVVCuN/6gVZrFj',
-          'credentialType': 'password',
-        },
-        // Metered TURN - Port 80 (UDP & TCP)
         {
           'urls': [
             'turn:global.relay.metered.ca:80',
             'turn:global.relay.metered.ca:80?transport=tcp',
-          ],
-          'url': 'turn:global.relay.metered.ca:80',
-          'username': 'e05c4a4a1347fef5fedaa1c5',
-          'credential': 'fCBVVCuN/6gVZrFj',
-          'password': 'fCBVVCuN/6gVZrFj',
-          'credentialType': 'password',
-        },
-        // Metered TURN - Port 443 (UDP & TCP & TURNS)
-        {
-          'urls': [
-            'turn:global.relay.metered.ca:443',
             'turn:global.relay.metered.ca:443?transport=tcp',
             'turns:global.relay.metered.ca:443?transport=tcp',
           ],
-          'url': 'turn:global.relay.metered.ca:443',
           'username': 'e05c4a4a1347fef5fedaa1c5',
           'credential': 'fCBVVCuN/6gVZrFj',
-          'password': 'fCBVVCuN/6gVZrFj',
-          'credentialType': 'password',
-        },
-        // OpenRelay TURN - Standard Port 3478 (UDP & TCP)
-        {
-          'urls': [
-            'turn:openrelay.metered.ca:3478',
-            'turn:openrelay.metered.ca:3478?transport=tcp',
-          ],
-          'url': 'turn:openrelay.metered.ca:3478',
-          'username': 'openrelay',
-          'credential': 'openrelay',
-          'password': 'openrelay',
-          'credentialType': 'password',
-        },
-        // OpenRelay TURN - Port 80 (UDP & TCP)
-        {
-          'urls': [
-            'turn:openrelay.metered.ca:80',
-            'turn:openrelay.metered.ca:80?transport=tcp',
-          ],
-          'url': 'turn:openrelay.metered.ca:80',
-          'username': 'openrelay',
-          'credential': 'openrelay',
-          'password': 'openrelay',
-          'credentialType': 'password',
-        },
-        // OpenRelay TURN - Port 443 (UDP & TCP & TURNS)
-        {
-          'urls': [
-            'turn:openrelay.metered.ca:443',
-            'turn:openrelay.metered.ca:443?transport=tcp',
-            'turns:openrelay.metered.ca:443?transport=tcp',
-          ],
-          'url': 'turn:openrelay.metered.ca:443',
-          'username': 'openrelay',
-          'credential': 'openrelay',
-          'password': 'openrelay',
-          'credentialType': 'password',
         },
       ],
-      'iceCandidatePoolSize': 10,
+      'iceCandidatePoolSize': 0,
       'iceTransportPolicy': policy,
+      'bundlePolicy': 'max-bundle',
       'rtcpMuxPolicy': 'require',
       'sdpSemantics': 'unified-plan',
     };
@@ -512,7 +440,9 @@ class Signaling {
       peerConnection = null;
     }
 
+    debugPrint('[PEER_CONFIG] ${jsonEncode(getConfiguration())}');
     peerConnection = await createPeerConnection(getConfiguration());
+    debugPrint('[PEER_CONNECTION_CREATED]');
 
     _registerPeerConnectionListeners();
 
@@ -533,9 +463,21 @@ class Signaling {
 
     // ICE Candidate handler for Caller
     peerConnection?.onIceCandidate = (RTCIceCandidate? candidate) async {
+      debugPrint('[RAW_ICE_CANDIDATE] candidate=${candidate?.candidate}');
       if (candidate == null || candidate.candidate == null || candidate.candidate!.isEmpty) return;
       final candStr = candidate.candidate!;
       final candType = _getCandidateType(candStr);
+
+      if (candStr.contains('typ relay')) {
+        debugPrint('[TURN_CANDIDATE_GENERATED] $candStr');
+      }
+      if (candStr.contains('typ srflx')) {
+        debugPrint('[SRFLX_CANDIDATE_GENERATED] $candStr');
+      }
+      if (candStr.contains('typ host')) {
+        debugPrint('[HOST_CANDIDATE_GENERATED] $candStr');
+      }
+
       if (candType == 'host') {
         _localHostCandidateCount++;
       } else if (candType == 'srflx') {
@@ -573,6 +515,19 @@ class Signaling {
       'updated_at': offerTimestamp,
     }).eq('id', roomId!);
     debugPrint('[ROOM_UPDATED] roomId=$roomId offerTimestamp=$offerTimestamp');
+
+    // 15-second ICE gathering timeout check (Requirement 8)
+    final gatheringTimeoutTimer = Timer(const Duration(seconds: 15), () {
+      debugPrint('[ICE_GATHERING_FINAL_COUNTS]');
+      debugPrint('host=$_localHostCandidateCount');
+      debugPrint('srflx=$_localSrflxCandidateCount');
+      debugPrint('relay=$_localRelayCandidateCount');
+
+      if (_localRelayCandidateCount == 0) {
+        debugPrint('[TURN_ALLOCATION_FAILED]');
+      }
+    });
+    _activeTimers.add(gatheringTimeoutTimer);
 
     // Fast 300ms REST polling for SDP answer from callee
     Timer? answerTimer;
@@ -722,7 +677,10 @@ class Signaling {
       peerConnection = null;
     }
 
+    debugPrint('[PEER_CONFIG] ${jsonEncode(getConfiguration())}');
     peerConnection = await createPeerConnection(getConfiguration());
+    debugPrint('[PEER_CONNECTION_CREATED]');
+
     _registerPeerConnectionListeners();
 
     localStream?.getTracks().forEach((track) {
@@ -741,9 +699,21 @@ class Signaling {
     } catch (_) {}
 
     peerConnection?.onIceCandidate = (RTCIceCandidate? candidate) async {
+      debugPrint('[RAW_ICE_CANDIDATE] candidate=${candidate?.candidate}');
       if (candidate == null || candidate.candidate == null || candidate.candidate!.isEmpty) return;
       final candStr = candidate.candidate!;
       final candType = _getCandidateType(candStr);
+
+      if (candStr.contains('typ relay')) {
+        debugPrint('[TURN_CANDIDATE_GENERATED] $candStr');
+      }
+      if (candStr.contains('typ srflx')) {
+        debugPrint('[SRFLX_CANDIDATE_GENERATED] $candStr');
+      }
+      if (candStr.contains('typ host')) {
+        debugPrint('[HOST_CANDIDATE_GENERATED] $candStr');
+      }
+
       if (candType == 'host') {
         _localHostCandidateCount++;
       } else if (candType == 'srflx') {
@@ -791,6 +761,19 @@ class Signaling {
       'updated_at': answerTimestamp,
     }).eq('id', joinRoomId);
     debugPrint('[ROOM_UPDATED] roomId=$joinRoomId answerTimestamp=$answerTimestamp status=connected');
+
+    // 15-second ICE gathering timeout check (Requirement 8)
+    final gatheringTimeoutTimer = Timer(const Duration(seconds: 15), () {
+      debugPrint('[ICE_GATHERING_FINAL_COUNTS]');
+      debugPrint('host=$_localHostCandidateCount');
+      debugPrint('srflx=$_localSrflxCandidateCount');
+      debugPrint('relay=$_localRelayCandidateCount');
+
+      if (_localRelayCandidateCount == 0) {
+        debugPrint('[TURN_ALLOCATION_FAILED]');
+      }
+    });
+    _activeTimers.add(gatheringTimeoutTimer);
 
     final addedCallerCandidates = <String>{};
     Timer? callerCandidateTimer;
@@ -950,6 +933,7 @@ class Signaling {
 
   void _registerPeerConnectionListeners() {
     peerConnection?.onIceGatheringState = (RTCIceGatheringState state) {
+      debugPrint('[ICE_GATHERING_STATE] $state');
       debugPrint('[STATE] IceGatheringState: $state');
       if (state == RTCIceGatheringState.RTCIceGatheringStateComplete) {
         debugPrint(
@@ -992,6 +976,7 @@ class Signaling {
     };
 
     peerConnection?.onIceConnectionState = (RTCIceConnectionState state) async {
+      debugPrint('[ICE_CONNECTION_STATE] $state');
       debugPrint('[STATE] IceConnectionState: $state');
       if (state == RTCIceConnectionState.RTCIceConnectionStateConnected ||
           state == RTCIceConnectionState.RTCIceConnectionStateCompleted) {
