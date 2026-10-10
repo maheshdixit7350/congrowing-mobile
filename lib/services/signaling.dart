@@ -48,6 +48,23 @@ class Signaling {
   Timer? _stabilityTimer;
   int _stabilitySeconds = 0;
 
+  String _getCandidateType(String candStr) {
+    if (candStr.contains('typ host')) return 'host';
+    if (candStr.contains('typ srflx')) return 'srflx';
+    if (candStr.contains('typ relay')) return 'relay';
+    return 'unknown';
+  }
+
+  void _auditSdp(String? sdp) {
+    final s = sdp ?? '';
+    final iceUfrag = s.contains('a=ice-ufrag');
+    final icePwd = s.contains('a=ice-pwd');
+    final bundle = s.contains('a=group:BUNDLE');
+    final rtcpMux = s.contains('a=rtcp-mux');
+    debugPrint(
+        '[SDP_AUDIT]\niceUfrag=$iceUfrag\nicePwd=$icePwd\nbundle=$bundle\nrtcpMux=$rtcpMux');
+  }
+
   void _startStabilityTimer() {
     if (_stabilityTimer != null) return;
     _stabilitySeconds = 0;
@@ -84,7 +101,7 @@ class Signaling {
   Map<String, dynamic> getConfiguration() {
     final policy = forceRelayOnly ? 'relay' : 'all';
     if (forceRelayOnly) {
-      debugPrint('[RELAY_ONLY_MODE_ENABLED] PeerConnection configured with iceTransportPolicy: relay');
+      debugPrint('[RELAY_ONLY_MODE_ENABLED]');
     } else {
       debugPrint('[RELAY_ONLY_MODE_DISABLED] PeerConnection configured with iceTransportPolicy: all');
     }
@@ -235,7 +252,6 @@ class Signaling {
         debugPrint('[MEDIA] stream=${stream.id} localStreamHash=${stream.hashCode} track=${track.id} label=${track.label} enabled=${track.enabled} muted=${track.muted}');
       }
 
-      // Note: Audio routing setSpeakerphoneOn moved to ICE connected event (Task 9)
       localVideo.srcObject = stream;
       localStream = stream;
       debugPrint('[Signaling] Fresh hardware media stream acquired.');
@@ -389,13 +405,13 @@ class Signaling {
     if (peerConnection == null) return;
     debugPrint('📡 Flushing ${_pendingCandidates.length} queued ICE candidates...');
     for (final candidate in List.of(_pendingCandidates)) {
+      final candType = _getCandidateType(candidate.candidate ?? '');
       try {
+        debugPrint('[ADD_CANDIDATE_ATTEMPT]\ntype=$candType');
         await peerConnection?.addCandidate(candidate);
-        debugPrint(
-            '📡 [ICE_FLUSHED] addCandidate SUCCESS: sdpMid=${candidate.sdpMid} sdpMLineIndex=${candidate.sdpMLineIndex} cand=${candidate.candidate}');
+        debugPrint('[ADD_CANDIDATE_SUCCESS]\ntype=$candType');
       } catch (e) {
-        debugPrint(
-            '⚠️ [ICE_FLUSHED_ERROR] Error adding buffered candidate (${candidate.candidate}): $e');
+        debugPrint('[ADD_CANDIDATE_FAILURE]\nerror=$e');
       }
     }
     _pendingCandidates.clear();
@@ -403,14 +419,14 @@ class Signaling {
 
   /// Adds a candidate, buffering it if remote description isn't set yet.
   Future<void> _addIceCandidateSafe(RTCIceCandidate candidate) async {
+    final candType = _getCandidateType(candidate.candidate ?? '');
     if (_remoteDescriptionSet && peerConnection != null) {
       try {
+        debugPrint('[ADD_CANDIDATE_ATTEMPT]\ntype=$candType');
         await peerConnection!.addCandidate(candidate);
-        debugPrint(
-            '📡 [ICE_ADDED] addCandidate SUCCESS: sdpMid=${candidate.sdpMid} sdpMLineIndex=${candidate.sdpMLineIndex} cand=${candidate.candidate}');
+        debugPrint('[ADD_CANDIDATE_SUCCESS]\ntype=$candType');
       } catch (e) {
-        debugPrint(
-            '⚠️ [ICE_ADD_ERROR] Error adding candidate (${candidate.candidate}): $e');
+        debugPrint('[ADD_CANDIDATE_FAILURE]\nerror=$e');
       }
     } else {
       debugPrint(
@@ -446,6 +462,8 @@ class Signaling {
     _localHostCandidateCount = 0;
     _localSrflxCandidateCount = 0;
     _localRelayCandidateCount = 0;
+
+    debugPrint('[CANDIDATE_TABLE_CLEANUP] Cleaning stale candidate tables for caller and callee.');
 
     final uid = SupabaseAuthService.instance.currentUser?.id;
 
@@ -516,20 +534,16 @@ class Signaling {
     peerConnection?.onIceCandidate = (RTCIceCandidate? candidate) async {
       if (candidate == null || candidate.candidate == null || candidate.candidate!.isEmpty) return;
       final candStr = candidate.candidate!;
-      String candType = 'unknown';
-      if (candStr.contains('typ host')) {
-        candType = 'host';
+      final candType = _getCandidateType(candStr);
+      if (candType == 'host') {
         _localHostCandidateCount++;
-      } else if (candStr.contains('typ srflx')) {
-        candType = 'srflx';
+      } else if (candType == 'srflx') {
         _localSrflxCandidateCount++;
-      } else if (candStr.contains('typ relay')) {
-        candType = 'relay';
+      } else if (candType == 'relay') {
         _localRelayCandidateCount++;
-        debugPrint('✅ [TURN_CONNECTIVITY_TEST] Relay candidate generated successfully! role=caller type=relay sdpMid=${candidate.sdpMid} sdpMLineIndex=${candidate.sdpMLineIndex}');
+        debugPrint('[TURN_RELAY_GENERATED]\ncandidate=$candStr');
       }
-      debugPrint(
-          '[ICE_GENERATED_LOCAL] role=caller type=$candType sdpMid=${candidate.sdpMid} sdpMLineIndex=${candidate.sdpMLineIndex} candidate=$candStr');
+      debugPrint('[CANDIDATE_DB_INSERT]\ntype=$candType\ncandidate=$candStr');
       try {
         await Supabase.instance.client.from('caller_candidates').insert({
           'room_id': roomId,
@@ -549,6 +563,7 @@ class Signaling {
     });
     await peerConnection!.setLocalDescription(offer);
 
+    _auditSdp(offer.sdp);
     debugPrint('[LOCAL_DESCRIPTION] role=caller type=${offer.type} sdpLength=${offer.sdp?.length}');
 
     final offerTimestamp = DateTime.now().toIso8601String();
@@ -591,7 +606,6 @@ class Signaling {
           debugPrint(
               '[ANSWER_RECEIVED] roomId=$roomId answerTimestamp=$answerTimestamp sdpLength=${answer.sdp?.length}');
 
-          // Lock immediately to prevent concurrent timer execution
           settingAnswer = true;
           _remoteDescriptionSet = true;
           answerTimer?.cancel();
@@ -619,7 +633,7 @@ class Signaling {
     });
     _activeTimers.add(answerTimer);
 
-    // Fast 300ms REST polling for Callee ICE candidates (Task 5 Validation Applied)
+    // Fast 300ms REST polling for Callee ICE candidates
     final addedCalleeCandidates = <String>{};
     Timer? calleeCandidateTimer;
     calleeCandidateTimer = Timer.periodic(const Duration(milliseconds: 300), (_) async {
@@ -633,20 +647,19 @@ class Signaling {
             .select()
             .eq('room_id', roomId!);
 
-        debugPrint('[CANDIDATE_COUNTS] callee_candidates count=${list.length} for roomId=$roomId');
-
         for (final candMap in list) {
           final candidateStr = candMap['candidate'] as String?;
           if (candidateStr != null && !addedCalleeCandidates.contains(candidateStr)) {
             addedCalleeCandidates.add(candidateStr);
+            final candType = _getCandidateType(candidateStr);
+            debugPrint('[CANDIDATE_DB_RETRIEVED]\ntype=$candType\ncandidate=$candidateStr');
+
             final candObj = _validateAndCreateCandidate(
               candidateStr,
               candMap['sdpmid'] ?? candMap['sdpMid'],
               candMap['sdpmlineindex'] ?? candMap['sdpMLineIndex'],
             );
             if (candObj != null) {
-              debugPrint(
-                  '[ICE_RETRIEVED_DB] callee candidate from DB: sdpMid=${candObj.sdpMid} sdpMLineIndex=${candObj.sdpMLineIndex} candidate=$candidateStr');
               await _addIceCandidateSafe(candObj);
             }
           }
@@ -675,7 +688,8 @@ class Signaling {
     _localSrflxCandidateCount = 0;
     _localRelayCandidateCount = 0;
 
-    // Poll for offer in rooms table up to 10s to eliminate race condition
+    debugPrint('[CANDIDATE_TABLE_CLEANUP] Cleaning stale candidate tables for caller and callee.');
+
     Map<String, dynamic>? roomData;
     for (int i = 0; i < 20; i++) {
       final res = await Supabase.instance.client
@@ -726,20 +740,16 @@ class Signaling {
     peerConnection?.onIceCandidate = (RTCIceCandidate? candidate) async {
       if (candidate == null || candidate.candidate == null || candidate.candidate!.isEmpty) return;
       final candStr = candidate.candidate!;
-      String candType = 'unknown';
-      if (candStr.contains('typ host')) {
-        candType = 'host';
+      final candType = _getCandidateType(candStr);
+      if (candType == 'host') {
         _localHostCandidateCount++;
-      } else if (candStr.contains('typ srflx')) {
-        candType = 'srflx';
+      } else if (candType == 'srflx') {
         _localSrflxCandidateCount++;
-      } else if (candStr.contains('typ relay')) {
-        candType = 'relay';
+      } else if (candType == 'relay') {
         _localRelayCandidateCount++;
-        debugPrint('✅ [TURN_CONNECTIVITY_TEST] Relay candidate generated successfully! role=callee type=relay sdpMid=${candidate.sdpMid} sdpMLineIndex=${candidate.sdpMLineIndex}');
+        debugPrint('[TURN_RELAY_GENERATED]\ncandidate=$candStr');
       }
-      debugPrint(
-          '[ICE_GENERATED_LOCAL] role=callee type=$candType sdpMid=${candidate.sdpMid} sdpMLineIndex=${candidate.sdpMLineIndex} candidate=$candStr');
+      debugPrint('[CANDIDATE_DB_INSERT]\ntype=$candType\ncandidate=$candStr');
       try {
         await Supabase.instance.client.from('callee_candidates').insert({
           'room_id': joinRoomId,
@@ -767,6 +777,7 @@ class Signaling {
     });
     await peerConnection!.setLocalDescription(answer);
 
+    _auditSdp(answer.sdp);
     debugPrint(
         '[LOCAL_DESCRIPTION] role=callee setLocalDescription answer sdpLength=${answer.sdp?.length} type=${answer.type}');
 
@@ -778,7 +789,6 @@ class Signaling {
     }).eq('id', joinRoomId);
     debugPrint('[ROOM_UPDATED] roomId=$joinRoomId answerTimestamp=$answerTimestamp status=connected');
 
-    // Fast 300ms REST polling for Caller ICE candidates (Task 5 Validation Applied)
     final addedCallerCandidates = <String>{};
     Timer? callerCandidateTimer;
     callerCandidateTimer = Timer.periodic(const Duration(milliseconds: 300), (_) async {
@@ -792,20 +802,19 @@ class Signaling {
             .select()
             .eq('room_id', joinRoomId);
 
-        debugPrint('[CANDIDATE_COUNTS] caller_candidates count=${list.length} for roomId=$joinRoomId');
-
         for (final candMap in list) {
           final candidateStr = candMap['candidate'] as String?;
           if (candidateStr != null && !addedCallerCandidates.contains(candidateStr)) {
             addedCallerCandidates.add(candidateStr);
+            final candType = _getCandidateType(candidateStr);
+            debugPrint('[CANDIDATE_DB_RETRIEVED]\ntype=$candType\ncandidate=$candidateStr');
+
             final candObj = _validateAndCreateCandidate(
               candidateStr,
               candMap['sdpmid'] ?? candMap['sdpMid'],
               candMap['sdpmlineindex'] ?? candMap['sdpMLineIndex'],
             );
             if (candObj != null) {
-              debugPrint(
-                  '[ICE_RETRIEVED_DB] caller candidate from DB: sdpMid=${candObj.sdpMid} sdpMLineIndex=${candObj.sdpMLineIndex} candidate=$candidateStr');
               await _addIceCandidateSafe(candObj);
             }
           }
@@ -910,6 +919,7 @@ class Signaling {
           'offerToReceiveAudio': true,
           'offerToReceiveVideo': true,
         });
+        _auditSdp(offer.sdp);
         debugPrint('[ICE_RESTART_OFFER_CREATED] sdpLength=${offer.sdp?.length}');
         await peerConnection!.setLocalDescription(offer);
 
@@ -919,11 +929,12 @@ class Signaling {
         }).eq('id', roomId!);
         debugPrint('[ICE_RESTART_OFFER_SENT] Restart offer updated in rooms table.');
       } else {
-        debugPrint('[ICE_RESTART_CALLEE] Callee triggering peerConnection.restartIce()...');
+        debugPrint('[ICE_RESTART_REMOTE_RECEIVED] Callee triggering peerConnection.restartIce()...');
         await peerConnection?.restartIce();
+        debugPrint('[ICE_RESTART_COMPLETED] Callee ICE restart triggered successfully.');
       }
     } catch (e) {
-      debugPrint('⚠️ [ICE_RESTART_ERROR] Error during ICE restart: $e');
+      debugPrint('⚠️ [ICE_RESTART_FAILURE] Error during ICE restart: $e');
     } finally {
       _isRestartingIce = false;
     }
@@ -936,13 +947,13 @@ class Signaling {
       debugPrint('[STATE] IceGatheringState: $state');
       if (state == RTCIceGatheringState.RTCIceGatheringStateComplete) {
         debugPrint(
-            '[CANDIDATE_SUMMARY] host=$_localHostCandidateCount srflx=$_localSrflxCandidateCount relay=$_localRelayCandidateCount');
+            '[CANDIDATE_SUMMARY]\nrole=${isCaller ? "caller" : "callee"}\nhost=$_localHostCandidateCount\nsrflx=$_localSrflxCandidateCount\nrelay=$_localRelayCandidateCount');
         if (_localRelayCandidateCount == 0) {
           debugPrint(
-              '⚠️ [CANDIDATE_SUMMARY_ALERT] ZERO TURN relay candidates generated during gathering! TURN allocation failed or server unreachable.');
+              '[FATAL_TURN_FAILURE]\nhost=$_localHostCandidateCount\nsrflx=$_localSrflxCandidateCount\nrelay=0');
         } else {
           debugPrint(
-              '✅ [TURN_RELAY_GENERATED] TURN relay candidates generated successfully! relayCount=$_localRelayCandidateCount');
+              '✅ [TURN_RELAY_GENERATED]\ncandidate=relayCount=$_localRelayCandidateCount');
         }
       }
     };
@@ -982,7 +993,6 @@ class Signaling {
         _startStabilityTimer();
         debugPrint('✅ [ICE] Media transport CONNECTED / COMPLETED!');
 
-        // Audio Routing Fix (Task 9): Enable speakerphone AFTER ICE connects
         try {
           if (!kIsWeb) {
             await Helper.setSpeakerphoneOn(true);
@@ -995,7 +1005,7 @@ class Signaling {
         try {
           final stats = await peerConnection?.getStats();
           for (final report in stats ?? []) {
-            if (report.type == 'candidate-pair' &&
+            if ((report.type == 'candidate-pair' || report.type == 'googCandidatePair') &&
                 (report.values['state'] == 'succeeded' || report.values['nominated'] == true)) {
               debugPrint(
                   '[ICE_SELECTED_PAIR] localCandidateId=${report.values['localCandidateId']} remoteCandidateId=${report.values['remoteCandidateId']} RTT=${report.values['currentRoundTripTime']} state=${report.values['state']}');
@@ -1045,7 +1055,7 @@ class Signaling {
     };
   }
 
-  // ── Stats Logging & Hardening (Task 1, 6, 7, 8) ────────────────────────────
+  // ── Stats Logging & Hardening ──────────────────────────────────────────────
 
   void _startStatsLogging() {
     if (_statsLoggingStarted || _statsTimer != null) {
@@ -1061,7 +1071,6 @@ class Signaling {
         return;
       }
       try {
-        // Media Flow Validation (Task 6)
         for (final track in localStream?.getAudioTracks() ?? []) {
           debugPrint(
               '[MIC_TRACK] enabled=${track.enabled} muted=${track.muted} label=${track.label} id=${track.id}');
@@ -1123,18 +1132,16 @@ class Signaling {
               final remoteId = values['remoteCandidateId']?.toString() ?? '';
               final localCand = candidateMap[localId];
               final remoteCand = candidateMap[remoteId];
-              final localType = localCand?['candidateType'] ?? localCand?['candidate_type'] ?? 'unknown';
-              final remoteType = remoteCand?['candidateType'] ?? remoteCand?['candidate_type'] ?? 'unknown';
+              final localType = localCand?['candidateType'] ?? localCand?['candidate_type'] ?? _getCandidateType(localCand?['ip'] ?? '');
+              final remoteType = remoteCand?['candidateType'] ?? remoteCand?['candidate_type'] ?? _getCandidateType(remoteCand?['ip'] ?? '');
               final pairRtt = values['currentRoundTripTime'] ?? 0;
 
-              if (isNominated || state == 'succeeded') {
-                debugPrint(
-                    '[ICE_PAIR_STATE] pairId=${report.id} state=$state nominated=$isNominated writable=$isWritable localCandidateType=$localType remoteCandidateType=$remoteType rtt=$pairRtt');
-              }
+              debugPrint(
+                  '[ICE_PAIR]\nstate=$state\nnominated=$isNominated\nwritable=$isWritable\nlocalCandidateId=$localId\nremoteCandidateId=$remoteId');
 
               if (isNominated && (state == 'succeeded' || isWritable)) {
                 debugPrint(
-                    '[ACTIVE_ICE_PAIR] local=$localType remote=$remoteType state=$state rtt=$pairRtt nominated=$isNominated');
+                    '[ACTIVE_ICE_PAIR]\nlocalType=$localType\nremoteType=$remoteType\nstate=$state\nrtt=$pairRtt');
                 debugPrint(
                     '[ICE_SELECTED_PAIR] localCandidateType=$localType remoteCandidateType=$remoteType candidatePairState=$state rtt=$pairRtt');
                 currentRTT = pairRtt;
@@ -1142,7 +1149,11 @@ class Signaling {
             }
           }
 
-          // RTP Flow Validation (Task 7)
+          debugPrint(
+              '[RTP_RX]\naudioPackets=$audioPacketsReceived\nvideoPackets=$videoPacketsReceived\nbytesReceived=$bytesReceived');
+          debugPrint(
+              '[RTP_TX]\naudioPackets=$audioPacketsSent\nvideoPackets=$videoPacketsSent\nbytesSent=$bytesSent');
+
           final totalPackets = audioPacketsSent + audioPacketsReceived + videoPacketsSent + videoPacketsReceived;
           final prevTotalPackets = _lastAudioPacketsSent + _lastAudioPacketsReceived + _lastVideoPacketsSent + _lastVideoPacketsReceived;
 
