@@ -325,6 +325,7 @@ class Signaling {
     peerConnection = await createPeerConnection(configuration);
 
     _registerPeerConnectionListeners();
+    _startStatsLogging();
 
     localStream?.getTracks().forEach((track) {
       peerConnection?.addTrack(track, localStream!);
@@ -343,7 +344,16 @@ class Signaling {
     // ICE Candidate handler for Caller
     peerConnection?.onIceCandidate = (RTCIceCandidate? candidate) async {
       if (candidate == null || candidate.candidate == null) return;
-      debugPrint('[ICE_GENERATED_LOCAL] caller sdpMid=${candidate.sdpMid} sdpMLineIndex=${candidate.sdpMLineIndex} candidate=${candidate.candidate}');
+      final candStr = candidate.candidate ?? '';
+      String candType = 'unknown';
+      if (candStr.contains('typ host')) {
+        candType = 'host';
+      } else if (candStr.contains('typ srflx')) {
+        candType = 'srflx';
+      } else if (candStr.contains('typ relay')) {
+        candType = 'relay';
+      }
+      debugPrint('[ICE_GENERATED_LOCAL] role=caller type=$candType sdpMid=${candidate.sdpMid} sdpMLineIndex=${candidate.sdpMLineIndex} candidate=$candStr');
       try {
         await Supabase.instance.client.from('caller_candidates').insert({
           'room_id': roomId,
@@ -351,7 +361,7 @@ class Signaling {
           'sdpmid': candidate.sdpMid ?? '0',
           'sdpmlineindex': candidate.sdpMLineIndex ?? 0,
         });
-        debugPrint('[ICE_STORED_DB] caller candidate inserted to DB successfully: ${candidate.candidate}');
+        debugPrint('[ICE_STORED_DB] caller candidate inserted to DB successfully: $candStr');
       } catch (e) {
         debugPrint('⚠️ [ICE_STORE_ERROR] Error inserting caller ICE candidate to DB: $e');
       }
@@ -363,34 +373,68 @@ class Signaling {
     });
     await peerConnection!.setLocalDescription(offer);
 
+    debugPrint('[LOCAL_DESCRIPTION] role=caller type=${offer.type} sdpLength=${offer.sdp?.length}');
+
+    final offerTimestamp = DateTime.now().toIso8601String();
     await Supabase.instance.client.from('rooms').update({
       'offer': offer.toMap(),
-      'updated_at': DateTime.now().toIso8601String(),
+      'updated_at': offerTimestamp,
     }).eq('id', roomId!);
+    debugPrint('[ROOM_UPDATED] roomId=$roomId offerTimestamp=$offerTimestamp');
 
     // Fast 300ms REST polling for SDP answer from callee
     Timer? answerTimer;
+    bool settingAnswer = false;
+
     answerTimer = Timer.periodic(const Duration(milliseconds: 300), (_) async {
-      if (_remoteDescriptionSet || peerConnection == null || roomId == null) {
+      if (_remoteDescriptionSet || settingAnswer || peerConnection == null || roomId == null) {
         answerTimer?.cancel();
         return;
       }
       try {
+        final currentSigState = await peerConnection?.getSignalingState();
+        if (_remoteDescriptionSet || currentSigState == RTCSignalingState.RTCSignalingStateStable) {
+          debugPrint('[ANSWER_ALREADY_APPLIED] Signaling state is already stable ($currentSigState). Skipping duplicate answer.');
+          _remoteDescriptionSet = true;
+          answerTimer?.cancel();
+          return;
+        }
+
         final res = await Supabase.instance.client
             .from('rooms')
-            .select('answer')
+            .select('answer, updated_at')
             .eq('id', roomId!)
             .maybeSingle();
-        if (res != null && res['answer'] != null && !_remoteDescriptionSet) {
+
+        if (res != null && res['answer'] != null && !_remoteDescriptionSet && !settingAnswer) {
           final answerMap = Map<String, dynamic>.from(res['answer']);
           final answer = RTCSessionDescription(answerMap['sdp'], answerMap['type']);
-          await peerConnection?.setRemoteDescription(answer);
+          final answerTimestamp = res['updated_at']?.toString() ?? '';
+
+          debugPrint('[ANSWER_RECEIVED] roomId=$roomId answerTimestamp=$answerTimestamp sdpLength=${answer.sdp?.length}');
+
+          // Lock immediately to prevent concurrent timer execution
+          settingAnswer = true;
           _remoteDescriptionSet = true;
-          await _flushPendingCandidates();
           answerTimer?.cancel();
+          debugPrint('[ANSWER_POLL_STOPPED] Answer polling timer stopped.');
+
+          final sigBefore = await peerConnection?.getSignalingState();
+          debugPrint('[SIGNALING_BEFORE_ANSWER] currentState=$sigBefore sdpLength=${answer.sdp?.length} type=${answer.type}');
+
+          if (sigBefore == RTCSignalingState.RTCSignalingStateHaveLocalOffer) {
+            await peerConnection?.setRemoteDescription(answer);
+            debugPrint('[REMOTE_DESCRIPTION] role=caller setRemoteDescription SUCCESS! SignalingState is now: ${await peerConnection?.getSignalingState()}');
+            debugPrint('[ANSWER_APPLIED] Answer applied successfully!');
+            await _flushPendingCandidates();
+          } else {
+            debugPrint('⚠️ [ANSWER_SKIPPED] Cannot apply answer SDP in state $sigBefore');
+          }
         }
       } catch (e) {
         debugPrint('Error polling answer: $e');
+      } finally {
+        settingAnswer = false;
       }
     });
     _activeTimers.add(answerTimer);
@@ -408,6 +452,9 @@ class Signaling {
             .from('callee_candidates')
             .select()
             .eq('room_id', roomId!);
+        
+        debugPrint('[CANDIDATE_COUNTS] callee_candidates count=${list.length} for roomId=$roomId');
+
         for (final candMap in list) {
           final candidateStr = candMap['candidate'] as String?;
           if (candidateStr != null && !addedCalleeCandidates.contains(candidateStr)) {
@@ -475,6 +522,7 @@ class Signaling {
 
     peerConnection = await createPeerConnection(configuration);
     _registerPeerConnectionListeners();
+    _startStatsLogging();
 
     localStream?.getTracks().forEach((track) {
       peerConnection?.addTrack(track, localStream!);
@@ -492,7 +540,16 @@ class Signaling {
 
     peerConnection?.onIceCandidate = (RTCIceCandidate? candidate) async {
       if (candidate == null || candidate.candidate == null) return;
-      debugPrint('[ICE_GENERATED_LOCAL] callee sdpMid=${candidate.sdpMid} sdpMLineIndex=${candidate.sdpMLineIndex} candidate=${candidate.candidate}');
+      final candStr = candidate.candidate ?? '';
+      String candType = 'unknown';
+      if (candStr.contains('typ host')) {
+        candType = 'host';
+      } else if (candStr.contains('typ srflx')) {
+        candType = 'srflx';
+      } else if (candStr.contains('typ relay')) {
+        candType = 'relay';
+      }
+      debugPrint('[ICE_GENERATED_LOCAL] role=callee type=$candType sdpMid=${candidate.sdpMid} sdpMLineIndex=${candidate.sdpMLineIndex} candidate=$candStr');
       try {
         await Supabase.instance.client.from('callee_candidates').insert({
           'room_id': joinRoomId,
@@ -500,16 +557,16 @@ class Signaling {
           'sdpmid': candidate.sdpMid ?? '0',
           'sdpmlineindex': candidate.sdpMLineIndex ?? 0,
         });
-        debugPrint('[ICE_STORED_DB] callee candidate inserted to DB successfully: ${candidate.candidate}');
+        debugPrint('[ICE_STORED_DB] callee candidate inserted to DB successfully: $candStr');
       } catch (e) {
         debugPrint('⚠️ [ICE_STORE_ERROR] Error inserting callee ICE candidate to DB: $e');
       }
     };
 
     final offerMap = Map<String, dynamic>.from(roomData['offer']);
-    await peerConnection?.setRemoteDescription(
-      RTCSessionDescription(offerMap['sdp'], offerMap['type']),
-    );
+    final remoteOffer = RTCSessionDescription(offerMap['sdp'], offerMap['type']);
+    debugPrint('[REMOTE_DESCRIPTION] role=callee setting remote offer sdpLength=${remoteOffer.sdp?.length} type=${remoteOffer.type}');
+    await peerConnection?.setRemoteDescription(remoteOffer);
     _remoteDescriptionSet = true;
     await _flushPendingCandidates();
 
@@ -519,11 +576,15 @@ class Signaling {
     });
     await peerConnection!.setLocalDescription(answer);
 
+    debugPrint('[LOCAL_DESCRIPTION] role=callee setLocalDescription answer sdpLength=${answer.sdp?.length} type=${answer.type}');
+
+    final answerTimestamp = DateTime.now().toIso8601String();
     await Supabase.instance.client.from('rooms').update({
       'answer': {'type': answer.type, 'sdp': answer.sdp},
       'status': 'connected',
-      'updated_at': DateTime.now().toIso8601String(),
+      'updated_at': answerTimestamp,
     }).eq('id', joinRoomId);
+    debugPrint('[ROOM_UPDATED] roomId=$joinRoomId answerTimestamp=$answerTimestamp status=connected');
 
     // Fast 300ms REST polling for Caller ICE candidates
     final addedCallerCandidates = <String>{};
@@ -538,6 +599,9 @@ class Signaling {
             .from('caller_candidates')
             .select()
             .eq('room_id', joinRoomId);
+
+        debugPrint('[CANDIDATE_COUNTS] caller_candidates count=${list.length} for roomId=$joinRoomId');
+
         for (final candMap in list) {
           final candidateStr = candMap['candidate'] as String?;
           if (candidateStr != null && !addedCallerCandidates.contains(candidateStr)) {
@@ -743,6 +807,13 @@ class Signaling {
           int bytesReceived = 0;
           num currentRTT = 0;
 
+          final candidateMap = <String, Map<String, dynamic>>{};
+          for (final report in stats) {
+            if (report.type == 'local-candidate' || report.type == 'remote-candidate') {
+              candidateMap[report.id] = report.values;
+            }
+          }
+
           for (final report in stats) {
             final values = report.values;
             if (report.type == 'outbound-rtp' && (values['kind'] == 'audio' || values['mediaType'] == 'audio')) {
@@ -753,11 +824,27 @@ class Signaling {
               packetsReceived = values['packetsReceived'] ?? 0;
               bytesReceived = values['bytesReceived'] ?? 0;
             }
-            if (report.type == 'candidate-pair' && values['currentRoundTripTime'] != null) {
-              currentRTT = values['currentRoundTripTime'];
+            if (report.type == 'candidate-pair') {
+              final state = values['state']?.toString() ?? 'unknown';
+              final isNominated = values['nominated'] == true;
+              final localId = values['localCandidateId']?.toString() ?? '';
+              final remoteId = values['remoteCandidateId']?.toString() ?? '';
+              final localCand = candidateMap[localId];
+              final remoteCand = candidateMap[remoteId];
+              final localType = localCand?['candidateType'] ?? localCand?['candidate_type'] ?? 'unknown';
+              final remoteType = remoteCand?['candidateType'] ?? remoteCand?['candidate_type'] ?? 'unknown';
+              final pairRtt = values['currentRoundTripTime'] ?? 0;
+
+              debugPrint('[ICE_PAIR_STATE] pairId=${report.id} state=$state nominated=$isNominated localType=$localType remoteType=$remoteType rtt=$pairRtt');
+
+              if (isNominated || state == 'succeeded') {
+                debugPrint('[ICE_NOMINATED_PAIR] pairId=${report.id} localType=$localType remoteType=$remoteType rtt=$pairRtt');
+                debugPrint('[ICE_SELECTED_PAIR] localCandidateType=$localType remoteCandidateType=$remoteType candidatePairState=$state rtt=$pairRtt');
+                currentRTT = pairRtt;
+              }
             }
           }
-          debugPrint('[WEBRTC_STATS] packetsSent=$packetsSent packetsReceived=$packetsReceived bytesSent=$bytesSent bytesReceived=$bytesReceived audioRTT=$currentRTT');
+          debugPrint('[WEBRTC_STATS] bytesSent=$bytesSent bytesReceived=$bytesReceived packetsSent=$packetsSent packetsReceived=$packetsReceived currentRoundTripTime=$currentRTT');
         }
       } catch (e) {
         debugPrint('[WEBRTC_STATS] Error fetching stats: $e');
