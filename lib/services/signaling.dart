@@ -1087,14 +1087,16 @@ class Signaling {
 
           final candidateMap = <String, Map<dynamic, dynamic>>{};
           for (final report in stats) {
-            if (report.type == 'local-candidate' || report.type == 'remote-candidate') {
+            final t = report.type.toLowerCase();
+            if (t == 'local-candidate' || t == 'remote-candidate' || t == 'googlocalcandidate' || t == 'googremotecandidate') {
               candidateMap[report.id] = report.values;
             }
           }
 
           for (final report in stats) {
             final values = report.values;
-            if (report.type == 'outbound-rtp') {
+            final rType = report.type.toLowerCase();
+            if (rType == 'outbound-rtp') {
               if (values['kind'] == 'audio' || values['mediaType'] == 'audio') {
                 audioPacketsSent = values['packetsSent'] ?? 0;
                 bytesSent += (values['bytesSent'] as int? ?? 0);
@@ -1103,7 +1105,7 @@ class Signaling {
                 bytesSent += (values['bytesSent'] as int? ?? 0);
               }
             }
-            if (report.type == 'inbound-rtp') {
+            if (rType == 'inbound-rtp') {
               if (values['kind'] == 'audio' || values['mediaType'] == 'audio') {
                 audioPacketsReceived = values['packetsReceived'] ?? 0;
                 bytesReceived += (values['bytesReceived'] as int? ?? 0);
@@ -1113,7 +1115,7 @@ class Signaling {
               }
             }
 
-            if (report.type == 'candidate-pair') {
+            if (rType == 'candidate-pair' || rType == 'googcandidatepair') {
               final state = values['state']?.toString() ?? 'unknown';
               final isNominated = values['nominated'] == true;
               final isWritable = values['writable'] == true;
