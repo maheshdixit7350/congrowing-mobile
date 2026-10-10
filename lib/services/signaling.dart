@@ -342,6 +342,8 @@ class Signaling {
 
   RTCIceCandidate? _validateAndCreateCandidate(
       String? candidateStr, dynamic rawSdpMid, dynamic rawSdpMLineIndex) {
+    debugPrint(
+        '[RAW_CANDIDATE_RESTORE] candidate=$candidateStr sdpMid=$rawSdpMid sdpMLineIndex=$rawSdpMLineIndex');
     if (candidateStr == null || candidateStr.trim().isEmpty) {
       debugPrint('⚠️ [INVALID_CANDIDATE] Candidate string is null or empty.');
       return null;
@@ -389,7 +391,10 @@ class Signaling {
   /// Adds a candidate, buffering it if remote description isn't set yet.
   Future<void> _addIceCandidateSafe(RTCIceCandidate candidate) async {
     final candType = _getCandidateType(candidate.candidate ?? '');
-    if (_remoteDescriptionSet && peerConnection != null) {
+    final remoteDesc = peerConnection != null ? await peerConnection!.getRemoteDescription() : null;
+    final hasRemoteDesc = (remoteDesc != null && remoteDesc.sdp != null && remoteDesc.sdp!.isNotEmpty);
+
+    if (_remoteDescriptionSet && hasRemoteDesc) {
       try {
         debugPrint('[ADD_CANDIDATE_ATTEMPT]\ntype=$candType');
         await peerConnection!.addCandidate(candidate);
@@ -399,7 +404,7 @@ class Signaling {
       }
     } else {
       debugPrint(
-          '📡 [ICE_QUEUED] Queuing candidate (remote description not ready yet): sdpMid=${candidate.sdpMid} cand=${candidate.candidate}');
+          '📡 [ICE_QUEUED_REMOTE_DESCRIPTION_MISSING] Queuing candidate (remote description missing): sdpMid=${candidate.sdpMid} cand=${candidate.candidate}');
       _pendingCandidates.add(candidate);
     }
   }
@@ -538,8 +543,8 @@ class Signaling {
         await Supabase.instance.client.from('caller_candidates').insert({
           'room_id': roomId,
           'candidate': candidate.candidate,
-          'sdpmid': candidate.sdpMid ?? '0',
-          'sdpmlineindex': candidate.sdpMLineIndex ?? 0,
+          'sdpmid': candidate.sdpMid,
+          'sdpmlineindex': candidate.sdpMLineIndex,
         });
         debugPrint('[ICE_STORED_DB] caller candidate inserted to DB successfully: $candStr');
       } catch (e) {
@@ -602,20 +607,23 @@ class Signaling {
               '[ANSWER_RECEIVED] roomId=$roomId answerTimestamp=$answerTimestamp sdpLength=${answer.sdp?.length}');
 
           settingAnswer = true;
-          _remoteDescriptionSet = true;
-          answerTimer?.cancel();
-          debugPrint('[ANSWER_POLL_STOPPED] Answer polling timer stopped.');
-
           final sigBefore = await peerConnection?.getSignalingState();
           debugPrint(
               '[SIGNALING_BEFORE_ANSWER] currentState=$sigBefore sdpLength=${answer.sdp?.length} type=${answer.type}');
 
           if (sigBefore == RTCSignalingState.RTCSignalingStateHaveLocalOffer) {
-            await peerConnection?.setRemoteDescription(answer);
-            debugPrint(
-                '[REMOTE_DESCRIPTION] role=caller setRemoteDescription SUCCESS! SignalingState is now: ${await peerConnection?.getSignalingState()}');
-            debugPrint('[ANSWER_APPLIED] Answer applied successfully!');
-            await _flushPendingCandidates();
+            try {
+              await peerConnection?.setRemoteDescription(answer);
+              _remoteDescriptionSet = true;
+              debugPrint(
+                  '[REMOTE_DESCRIPTION] role=caller setRemoteDescription SUCCESS! SignalingState is now: ${await peerConnection?.getSignalingState()}');
+              debugPrint('[ANSWER_APPLIED_SUCCESS]');
+              await _flushPendingCandidates();
+              answerTimer?.cancel();
+              debugPrint('[ANSWER_POLL_STOPPED] Answer polling timer stopped.');
+            } catch (e) {
+              debugPrint('[ANSWER_APPLY_FAILED] $e');
+            }
           } else {
             debugPrint('⚠️ [ANSWER_SKIPPED] Cannot apply answer SDP in state $sigBefore');
           }
@@ -776,8 +784,8 @@ class Signaling {
         await Supabase.instance.client.from('callee_candidates').insert({
           'room_id': joinRoomId,
           'candidate': candidate.candidate,
-          'sdpmid': candidate.sdpMid ?? '0',
-          'sdpmlineindex': candidate.sdpMLineIndex ?? 0,
+          'sdpmid': candidate.sdpMid,
+          'sdpmlineindex': candidate.sdpMLineIndex,
         });
         debugPrint('[ICE_STORED_DB] callee candidate inserted to DB successfully: $candStr');
       } catch (e) {
