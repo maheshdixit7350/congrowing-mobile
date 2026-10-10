@@ -947,7 +947,7 @@ class Signaling {
     return controller.stream.listen((_) {});
   }
 
-  // ── Proper ICE Restart with Renegotiation (Task 4) ─────────────────────────
+  Future<void> restartIceManually() => _restartIceWithRenegotiation();
 
   Future<void> _restartIceWithRenegotiation() async {
     if (_isRestartingIce || peerConnection == null || roomId == null) return;
@@ -985,10 +985,6 @@ class Signaling {
   // ── Peer Connection Listeners ─────────────────────────────────────────────
 
   void _registerPeerConnectionListeners() {
-    peerConnection?.onIceCandidateError = (event) {
-      debugPrint('[ICE_CANDIDATE_ERROR] $event');
-    };
-
     peerConnection?.onIceGatheringState = (RTCIceGatheringState state) {
       debugPrint('[ICE_GATHERING_STATE] $state');
       debugPrint('[STATE] IceGatheringState: $state');
