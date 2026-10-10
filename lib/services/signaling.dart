@@ -57,10 +57,16 @@ class Signaling {
     return 'unknown';
   }
 
-  String _buildCandidateKey(String candidate, String? sdpMid, dynamic rawSdpMLineIndex) {
-    final mid = (sdpMid != null && sdpMid.isNotEmpty) ? sdpMid : '0';
-    final lineIdx = rawSdpMLineIndex?.toString() ?? '0';
-    return '${candidate.trim()}_${mid}_$lineIdx';
+  String _buildCandidateKey(
+    String candidate,
+    String? sdpMid,
+    dynamic sdpMLineIndex,
+  ) {
+    return [
+      candidate.trim(),
+      sdpMid,
+      sdpMLineIndex,
+    ].join('|');
   }
 
   void _printFinalIceDiagnosticSummary() {
@@ -391,21 +397,39 @@ class Signaling {
   /// Adds a candidate, buffering it if remote description isn't set yet.
   Future<void> _addIceCandidateSafe(RTCIceCandidate candidate) async {
     final candType = _getCandidateType(candidate.candidate ?? '');
-    final remoteDesc = peerConnection != null ? await peerConnection!.getRemoteDescription() : null;
-    final hasRemoteDesc = (remoteDesc != null && remoteDesc.sdp != null && remoteDesc.sdp!.isNotEmpty);
 
-    if (_remoteDescriptionSet && hasRemoteDesc) {
-      try {
-        debugPrint('[ADD_CANDIDATE_ATTEMPT]\ntype=$candType');
-        await peerConnection!.addCandidate(candidate);
-        debugPrint('[ADD_CANDIDATE_SUCCESS]\ntype=$candType');
-      } catch (e) {
-        debugPrint('[ADD_CANDIDATE_FAILURE]\nerror=$e');
+    if (!_remoteDescriptionSet) {
+      final pendingKey = _buildCandidateKey(
+        candidate.candidate ?? '',
+        candidate.sdpMid,
+        candidate.sdpMLineIndex,
+      );
+
+      final isAlreadyQueued = _pendingCandidates.any((c) {
+        final key = _buildCandidateKey(
+          c.candidate ?? '',
+          c.sdpMid,
+          c.sdpMLineIndex,
+        );
+        return key == pendingKey;
+      });
+
+      if (isAlreadyQueued) {
+        debugPrint('[ICE_QUEUE_DUPLICATE_SKIPPED]');
+        return;
       }
-    } else {
-      debugPrint(
-          '📡 [ICE_QUEUED_REMOTE_DESCRIPTION_MISSING] Queuing candidate (remote description missing): sdpMid=${candidate.sdpMid} cand=${candidate.candidate}');
+
+      debugPrint('[ICE_QUEUED_REMOTE_DESCRIPTION_MISSING]');
       _pendingCandidates.add(candidate);
+      return;
+    }
+
+    try {
+      debugPrint('[ADD_CANDIDATE_ATTEMPT]\ntype=$candType');
+      await peerConnection?.addCandidate(candidate);
+      debugPrint('[ADD_CANDIDATE_SUCCESS]\ntype=$candType');
+    } catch (e) {
+      debugPrint('[ADD_CANDIDATE_FAILURE]\nerror=$e');
     }
   }
 
@@ -613,12 +637,15 @@ class Signaling {
 
           if (sigBefore == RTCSignalingState.RTCSignalingStateHaveLocalOffer) {
             try {
+              debugPrint(
+                  '[ANSWER_APPLY_ATTEMPT]\nstate=$sigBefore\ntype=${answer.type}\nlength=${answer.sdp?.length ?? 0}');
               await peerConnection?.setRemoteDescription(answer);
               _remoteDescriptionSet = true;
               debugPrint(
                   '[REMOTE_DESCRIPTION] role=caller setRemoteDescription SUCCESS! SignalingState is now: ${await peerConnection?.getSignalingState()}');
               debugPrint('[ANSWER_APPLIED_SUCCESS]');
               await _flushPendingCandidates();
+              debugPrint('[ANSWER_APPLIED_AND_CANDIDATES_FLUSHED]');
               answerTimer?.cancel();
               debugPrint('[ANSWER_POLL_STOPPED] Answer polling timer stopped.');
             } catch (e) {
