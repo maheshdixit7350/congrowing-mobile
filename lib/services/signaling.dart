@@ -85,9 +85,13 @@ class Signaling {
     final policy = forceRelayOnly ? 'relay' : 'all';
     if (forceRelayOnly) {
       debugPrint('[RELAY_ONLY_MODE_ENABLED] PeerConnection configured with iceTransportPolicy: relay');
+    } else {
+      debugPrint('[RELAY_ONLY_MODE_DISABLED] PeerConnection configured with iceTransportPolicy: all');
     }
+
     final config = <String, dynamic>{
       'iceServers': [
+        // Standard Google STUN
         {
           'urls': [
             'stun:stun.l.google.com:19302',
@@ -97,40 +101,79 @@ class Signaling {
             'stun:stun4.l.google.com:19302',
           ]
         },
+        // Metered TURN - Standard Port 3478 (UDP & TCP)
         {
-          'urls': ['turn:global.relay.metered.ca:80'],
+          'urls': [
+            'turn:global.relay.metered.ca:3478',
+            'turn:global.relay.metered.ca:3478?transport=tcp',
+          ],
+          'url': 'turn:global.relay.metered.ca:3478',
           'username': 'e05c4a4a1347fef5fedaa1c5',
           'credential': 'fCBVVCuN/6gVZrFj',
+          'password': 'fCBVVCuN/6gVZrFj',
+          'credentialType': 'password',
         },
+        // Metered TURN - Port 80 (UDP & TCP)
         {
-          'urls': ['turn:global.relay.metered.ca:80?transport=tcp'],
+          'urls': [
+            'turn:global.relay.metered.ca:80',
+            'turn:global.relay.metered.ca:80?transport=tcp',
+          ],
+          'url': 'turn:global.relay.metered.ca:80',
           'username': 'e05c4a4a1347fef5fedaa1c5',
           'credential': 'fCBVVCuN/6gVZrFj',
+          'password': 'fCBVVCuN/6gVZrFj',
+          'credentialType': 'password',
         },
+        // Metered TURN - Port 443 (UDP & TCP & TURNS)
         {
-          'urls': ['turn:global.relay.metered.ca:443'],
+          'urls': [
+            'turn:global.relay.metered.ca:443',
+            'turn:global.relay.metered.ca:443?transport=tcp',
+            'turns:global.relay.metered.ca:443?transport=tcp',
+          ],
+          'url': 'turn:global.relay.metered.ca:443',
           'username': 'e05c4a4a1347fef5fedaa1c5',
           'credential': 'fCBVVCuN/6gVZrFj',
+          'password': 'fCBVVCuN/6gVZrFj',
+          'credentialType': 'password',
         },
+        // OpenRelay TURN - Standard Port 3478 (UDP & TCP)
         {
-          'urls': ['turn:global.relay.metered.ca:443?transport=tcp'],
-          'username': 'e05c4a4a1347fef5fedaa1c5',
-          'credential': 'fCBVVCuN/6gVZrFj',
-        },
-        {
-          'urls': ['turn:openrelay.metered.ca:80'],
+          'urls': [
+            'turn:openrelay.metered.ca:3478',
+            'turn:openrelay.metered.ca:3478?transport=tcp',
+          ],
+          'url': 'turn:openrelay.metered.ca:3478',
           'username': 'openrelay',
           'credential': 'openrelay',
+          'password': 'openrelay',
+          'credentialType': 'password',
         },
+        // OpenRelay TURN - Port 80 (UDP & TCP)
         {
-          'urls': ['turn:openrelay.metered.ca:443'],
+          'urls': [
+            'turn:openrelay.metered.ca:80',
+            'turn:openrelay.metered.ca:80?transport=tcp',
+          ],
+          'url': 'turn:openrelay.metered.ca:80',
           'username': 'openrelay',
           'credential': 'openrelay',
+          'password': 'openrelay',
+          'credentialType': 'password',
         },
+        // OpenRelay TURN - Port 443 (UDP & TCP & TURNS)
         {
-          'urls': ['turn:openrelay.metered.ca:443?transport=tcp'],
+          'urls': [
+            'turn:openrelay.metered.ca:443',
+            'turn:openrelay.metered.ca:443?transport=tcp',
+            'turns:openrelay.metered.ca:443?transport=tcp',
+          ],
+          'url': 'turn:openrelay.metered.ca:443',
           'username': 'openrelay',
           'credential': 'openrelay',
+          'password': 'openrelay',
+          'credentialType': 'password',
         },
       ],
       'iceCandidatePoolSize': 10,
@@ -138,11 +181,13 @@ class Signaling {
       'rtcpMuxPolicy': 'require',
       'sdpSemantics': 'unified-plan',
     };
+
     final iceServers = config['iceServers'] as List;
     for (int i = 0; i < iceServers.length; i++) {
       final s = iceServers[i] as Map<String, dynamic>;
       debugPrint('[TURN_SERVER_ATTEMPT] index=$i urls=${s["urls"]} username=${s["username"] ?? "none"}');
     }
+
     return config;
   }
 
