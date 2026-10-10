@@ -44,6 +44,43 @@ class Signaling {
   int _lastVideoPacketsReceived = 0;
   int _noRtpFlowSeconds = 0;
 
+  // Stability timer metrics (Phase 7)
+  Timer? _stabilityTimer;
+  int _stabilitySeconds = 0;
+
+  void _startStabilityTimer() {
+    if (_stabilityTimer != null) return;
+    _stabilitySeconds = 0;
+    debugPrint('[CALL_STABILITY_TIMER_STARTED] Starting 60-second connection stability monitoring.');
+    _stabilityTimer = Timer.periodic(const Duration(seconds: 10), (_) {
+      if (peerConnection == null) {
+        _stopStabilityTimer();
+        return;
+      }
+      _stabilitySeconds += 10;
+      debugPrint(
+          '[CALL_STABILITY_TICK] elapsedSeconds=$_stabilitySeconds audioPacketsReceived=$_lastAudioPacketsReceived videoPacketsReceived=$_lastVideoPacketsReceived');
+      if (_stabilitySeconds >= 60) {
+        debugPrint(
+            '✅ [CALL_STABLE_60_SECONDS] Connection maintained stable audio/video flow for 60 seconds!');
+        _stopStabilityTimer();
+      }
+    });
+    _activeTimers.add(_stabilityTimer!);
+  }
+
+  void _stopStabilityTimer() {
+    if (_stabilityTimer != null) {
+      try {
+        _stabilityTimer!.cancel();
+        _activeTimers.remove(_stabilityTimer);
+      } catch (_) {}
+      _stabilityTimer = null;
+      debugPrint('[CALL_STABILITY_TIMER_STOPPED] Stability timer stopped.');
+    }
+    _stabilitySeconds = 0;
+  }
+
   Map<String, dynamic> getConfiguration() {
     final policy = forceRelayOnly ? 'relay' : 'all';
     if (forceRelayOnly) {
@@ -182,6 +219,7 @@ class Signaling {
   Future<void> hangUp(RTCVideoRenderer? localVideo, [RTCVideoRenderer? remoteVideo]) async {
     try {
       _stopStatsLogging();
+      _stopStabilityTimer();
 
       for (final timer in _activeTimers) {
         try {
@@ -896,6 +934,7 @@ class Signaling {
       if (state == RTCIceConnectionState.RTCIceConnectionStateConnected ||
           state == RTCIceConnectionState.RTCIceConnectionStateCompleted) {
         _startStatsLogging();
+        _startStabilityTimer();
         debugPrint('✅ [ICE] Media transport CONNECTED / COMPLETED!');
 
         // Audio Routing Fix (Task 9): Enable speakerphone AFTER ICE connects
@@ -920,6 +959,8 @@ class Signaling {
         } catch (_) {}
       }
       if (state == RTCIceConnectionState.RTCIceConnectionStateFailed) {
+        debugPrint('⚠️ [CALL_STABILITY_FAILURE] ICE entered failed state after ${_stabilitySeconds}s of connection monitoring!');
+        _stopStabilityTimer();
         debugPrint('⚠️ [ICE] Connection failed! Initiating full ICE restart with renegotiation...');
         await _restartIceWithRenegotiation();
       }
