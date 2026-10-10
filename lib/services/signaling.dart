@@ -59,6 +59,8 @@ class Signaling {
       },
     ],
     'iceCandidatePoolSize': 10,
+    'iceTransportPolicy': 'all',
+    'rtcpMuxPolicy': 'require',
     'sdpSemantics': 'unified-plan',
   };
 
@@ -228,9 +230,9 @@ class Signaling {
     for (final candidate in List.of(_pendingCandidates)) {
       try {
         await peerConnection?.addCandidate(candidate);
-        debugPrint('📡 Flushed ICE candidate successfully');
+        debugPrint('📡 [ICE_FLUSHED] addCandidate SUCCESS: sdpMid=${candidate.sdpMid} sdpMLineIndex=${candidate.sdpMLineIndex} cand=${candidate.candidate}');
       } catch (e) {
-        debugPrint('Error adding buffered ICE candidate: $e');
+        debugPrint('⚠️ [ICE_FLUSHED_ERROR] Error adding buffered candidate (${candidate.candidate}): $e');
       }
     }
     _pendingCandidates.clear();
@@ -241,12 +243,12 @@ class Signaling {
     if (_remoteDescriptionSet && peerConnection != null) {
       try {
         await peerConnection!.addCandidate(candidate);
-        debugPrint('📡 Added WebRTC ICE candidate successfully');
+        debugPrint('📡 [ICE_ADDED] addCandidate SUCCESS: sdpMid=${candidate.sdpMid} sdpMLineIndex=${candidate.sdpMLineIndex} cand=${candidate.candidate}');
       } catch (e) {
-        debugPrint('Error adding ICE candidate: $e');
+        debugPrint('⚠️ [ICE_ADD_ERROR] Error adding candidate (${candidate.candidate}): $e');
       }
     } else {
-      debugPrint('📡 Queuing ICE candidate (remote description not ready yet)');
+      debugPrint('📡 [ICE_QUEUED] Queuing candidate (remote description not ready yet): sdpMid=${candidate.sdpMid} cand=${candidate.candidate}');
       _pendingCandidates.add(candidate);
     }
   }
@@ -341,13 +343,17 @@ class Signaling {
     // ICE Candidate handler for Caller
     peerConnection?.onIceCandidate = (RTCIceCandidate? candidate) async {
       if (candidate == null || candidate.candidate == null) return;
+      debugPrint('[ICE_GENERATED_LOCAL] caller sdpMid=${candidate.sdpMid} sdpMLineIndex=${candidate.sdpMLineIndex} candidate=${candidate.candidate}');
       try {
         await Supabase.instance.client.from('caller_candidates').insert({
           'room_id': roomId,
           'candidate': candidate.candidate,
+          'sdpMid': candidate.sdpMid ?? '0',
+          'sdpMLineIndex': candidate.sdpMLineIndex ?? 0,
           'sdpmid': candidate.sdpMid ?? '0',
           'sdpmlineindex': candidate.sdpMLineIndex ?? 0,
         });
+        debugPrint('[ICE_STORED_DB] caller candidate inserted to DB successfully');
       } catch (e) {
         debugPrint('Error sending caller ICE candidate: $e');
       }
@@ -408,14 +414,15 @@ class Signaling {
           final candidateStr = candMap['candidate'] as String?;
           if (candidateStr != null && !addedCalleeCandidates.contains(candidateStr)) {
             addedCalleeCandidates.add(candidateStr);
-            final sdpMid = (candMap['sdpMid'] ?? candMap['sdpmid'])?.toString();
+            final sdpMid = (candMap['sdpMid'] ?? candMap['sdpmid'] ?? '0').toString();
             final rawIndex = candMap['sdpMLineIndex'] ?? candMap['sdpmlineindex'];
-            int? sdpMLineIndex;
+            int sdpMLineIndex = 0;
             if (rawIndex is int) {
               sdpMLineIndex = rawIndex;
             } else if (rawIndex != null) {
-              sdpMLineIndex = int.tryParse(rawIndex.toString());
+              sdpMLineIndex = int.tryParse(rawIndex.toString()) ?? 0;
             }
+            debugPrint('[ICE_RETRIEVED_DB] callee candidate from DB: sdpMid=$sdpMid sdpMLineIndex=$sdpMLineIndex candidate=$candidateStr');
             await _addIceCandidateSafe(RTCIceCandidate(candidateStr, sdpMid, sdpMLineIndex));
           }
         }
@@ -487,13 +494,17 @@ class Signaling {
 
     peerConnection?.onIceCandidate = (RTCIceCandidate? candidate) async {
       if (candidate == null || candidate.candidate == null) return;
+      debugPrint('[ICE_GENERATED_LOCAL] callee sdpMid=${candidate.sdpMid} sdpMLineIndex=${candidate.sdpMLineIndex} candidate=${candidate.candidate}');
       try {
         await Supabase.instance.client.from('callee_candidates').insert({
           'room_id': joinRoomId,
           'candidate': candidate.candidate,
+          'sdpMid': candidate.sdpMid ?? '0',
+          'sdpMLineIndex': candidate.sdpMLineIndex ?? 0,
           'sdpmid': candidate.sdpMid ?? '0',
           'sdpmlineindex': candidate.sdpMLineIndex ?? 0,
         });
+        debugPrint('[ICE_STORED_DB] callee candidate inserted to DB successfully');
       } catch (e) {
         debugPrint('Error sending callee ICE candidate: $e');
       }
@@ -535,14 +546,15 @@ class Signaling {
           final candidateStr = candMap['candidate'] as String?;
           if (candidateStr != null && !addedCallerCandidates.contains(candidateStr)) {
             addedCallerCandidates.add(candidateStr);
-            final sdpMid = (candMap['sdpMid'] ?? candMap['sdpmid'])?.toString();
+            final sdpMid = (candMap['sdpMid'] ?? candMap['sdpmid'] ?? '0').toString();
             final rawIndex = candMap['sdpMLineIndex'] ?? candMap['sdpmlineindex'];
-            int? sdpMLineIndex;
+            int sdpMLineIndex = 0;
             if (rawIndex is int) {
               sdpMLineIndex = rawIndex;
             } else if (rawIndex != null) {
-              sdpMLineIndex = int.tryParse(rawIndex.toString());
+              sdpMLineIndex = int.tryParse(rawIndex.toString()) ?? 0;
             }
+            debugPrint('[ICE_RETRIEVED_DB] caller candidate from DB: sdpMid=$sdpMid sdpMLineIndex=$sdpMLineIndex candidate=$candidateStr');
             await _addIceCandidateSafe(RTCIceCandidate(candidateStr, sdpMid, sdpMLineIndex));
           }
         }
@@ -647,13 +659,25 @@ class Signaling {
     peerConnection?.onSignalingState = (RTCSignalingState state) {
       debugPrint('[STATE] SignalingState: $state');
     };
-    peerConnection?.onIceConnectionState = (RTCIceConnectionState state) {
+    peerConnection?.onIceConnectionState = (RTCIceConnectionState state) async {
       debugPrint('[STATE] IceConnectionState: $state');
-      if (state == RTCIceConnectionState.RTCIceConnectionStateConnected) {
+      if (state == RTCIceConnectionState.RTCIceConnectionStateConnected ||
+          state == RTCIceConnectionState.RTCIceConnectionStateCompleted) {
         _startStatsLogging();
+        debugPrint('✅ [ICE] Media transport CONNECTED / COMPLETED!');
+        try {
+          final stats = await peerConnection?.getStats();
+          for (final report in stats ?? []) {
+            if (report.type == 'candidate-pair' &&
+                (report.values['state'] == 'succeeded' || report.values['nominated'] == true)) {
+              debugPrint(
+                  '[ICE_SELECTED_PAIR] localCandidateId=${report.values['localCandidateId']} remoteCandidateId=${report.values['remoteCandidateId']} RTT=${report.values['currentRoundTripTime']} state=${report.values['state']}');
+            }
+          }
+        } catch (_) {}
       }
       if (state == RTCIceConnectionState.RTCIceConnectionStateFailed) {
-        debugPrint('⚠️ [Signaling] ICE connection failed. Restarting ICE...');
+        debugPrint('⚠️ [ICE] Connection failed! Triggering restartIce()...');
         try {
           peerConnection?.restartIce();
         } catch (_) {}
