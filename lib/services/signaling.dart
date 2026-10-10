@@ -13,7 +13,7 @@ typedef IncomingCallCallback = void Function(
 
 class Signaling {
   static String? activeCallRoomId;
-  static bool forceRelayOnly = false;
+  static bool forceRelayOnly = true;
 
   RTCPeerConnection? peerConnection;
   MediaStream? localStream;
@@ -49,9 +49,10 @@ class Signaling {
   int _stabilitySeconds = 0;
 
   String _getCandidateType(String candStr) {
-    if (candStr.contains('typ host')) return 'host';
-    if (candStr.contains('typ srflx')) return 'srflx';
-    if (candStr.contains('typ relay')) return 'relay';
+    final lower = candStr.toLowerCase();
+    if (lower.contains('typ host')) return 'host';
+    if (lower.contains('typ srflx')) return 'srflx';
+    if (lower.contains('typ relay')) return 'relay';
     return 'unknown';
   }
 
@@ -649,18 +650,20 @@ class Signaling {
 
         for (final candMap in list) {
           final candidateStr = candMap['candidate'] as String?;
-          if (candidateStr != null && !addedCalleeCandidates.contains(candidateStr)) {
-            addedCalleeCandidates.add(candidateStr);
+          if (candidateStr != null) {
             final candType = _getCandidateType(candidateStr);
             debugPrint('[CANDIDATE_DB_RETRIEVED]\ntype=$candType\ncandidate=$candidateStr');
 
-            final candObj = _validateAndCreateCandidate(
-              candidateStr,
-              candMap['sdpmid'] ?? candMap['sdpMid'],
-              candMap['sdpmlineindex'] ?? candMap['sdpMLineIndex'],
-            );
-            if (candObj != null) {
-              await _addIceCandidateSafe(candObj);
+            if (!addedCalleeCandidates.contains(candidateStr)) {
+              addedCalleeCandidates.add(candidateStr);
+              final candObj = _validateAndCreateCandidate(
+                candidateStr,
+                candMap['sdpmid'] ?? candMap['sdpMid'],
+                candMap['sdpmlineindex'] ?? candMap['sdpMLineIndex'],
+              );
+              if (candObj != null) {
+                await _addIceCandidateSafe(candObj);
+              }
             }
           }
         }
@@ -804,18 +807,21 @@ class Signaling {
 
         for (final candMap in list) {
           final candidateStr = candMap['candidate'] as String?;
-          if (candidateStr != null && !addedCallerCandidates.contains(candidateStr)) {
-            addedCallerCandidates.add(candidateStr);
+          if (candidateStr != null) {
             final candType = _getCandidateType(candidateStr);
             debugPrint('[CANDIDATE_DB_RETRIEVED]\ntype=$candType\ncandidate=$candidateStr');
 
-            final candObj = _validateAndCreateCandidate(
-              candidateStr,
-              candMap['sdpmid'] ?? candMap['sdpMid'],
-              candMap['sdpmlineindex'] ?? candMap['sdpMLineIndex'],
-            );
-            if (candObj != null) {
-              await _addIceCandidateSafe(candObj);
+            if (!addedCallerCandidates.contains(candidateStr)) {
+              addedCallerCandidates.add(candidateStr);
+
+              final candObj = _validateAndCreateCandidate(
+                candidateStr,
+                candMap['sdpmid'] ?? candMap['sdpMid'],
+                candMap['sdpmlineindex'] ?? candMap['sdpMLineIndex'],
+              );
+              if (candObj != null) {
+                await _addIceCandidateSafe(candObj);
+              }
             }
           }
         }
