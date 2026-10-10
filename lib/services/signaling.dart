@@ -14,7 +14,7 @@ typedef IncomingCallCallback = void Function(
 
 class Signaling {
   static String? activeCallRoomId;
-  static bool forceRelayOnly = true;
+  static bool forceRelayOnly = false;
 
   RTCPeerConnection? peerConnection;
   MediaStream? localStream;
@@ -55,6 +55,27 @@ class Signaling {
     if (lower.contains('typ srflx')) return 'srflx';
     if (lower.contains('typ relay')) return 'relay';
     return 'unknown';
+  }
+
+  void _printFinalIceDiagnosticSummary() {
+    debugPrint('[FINAL_ICE_DIAGNOSTICS]');
+    debugPrint('host=$_localHostCandidateCount');
+    debugPrint('srflx=$_localSrflxCandidateCount');
+    debugPrint('relay=$_localRelayCandidateCount');
+
+    if (_localHostCandidateCount > 0 && _localRelayCandidateCount == 0) {
+      debugPrint('[TURN_SERVER_OR_CREDENTIAL_FAILURE]');
+    }
+
+    if (_localHostCandidateCount == 0 &&
+        _localSrflxCandidateCount == 0 &&
+        _localRelayCandidateCount == 0) {
+      debugPrint('[ICE_GATHERING_COMPLETELY_FAILED]');
+    }
+
+    if (_localRelayCandidateCount > 0) {
+      debugPrint('[TURN_ALLOCATION_SUCCESS]');
+    }
   }
 
   void _auditSdp(String? sdp) {
@@ -112,8 +133,11 @@ class Signaling {
       'iceServers': [
         {
           'urls': [
+            'turn:global.relay.metered.ca:3478',
+            'turn:global.relay.metered.ca:3478?transport=tcp',
             'turn:global.relay.metered.ca:80',
             'turn:global.relay.metered.ca:80?transport=tcp',
+            'turn:global.relay.metered.ca:443',
             'turn:global.relay.metered.ca:443?transport=tcp',
             'turns:global.relay.metered.ca:443?transport=tcp',
           ],
@@ -440,8 +464,12 @@ class Signaling {
       peerConnection = null;
     }
 
-    debugPrint('[PEER_CONFIG] ${jsonEncode(getConfiguration())}');
-    peerConnection = await createPeerConnection(getConfiguration());
+    final config = getConfiguration();
+    debugPrint('[PEER_CONFIG] ${jsonEncode(config)}');
+    debugPrint('[ICE_TRANSPORT_POLICY] ${config['iceTransportPolicy']}');
+    debugPrint('[ICE_SERVERS] ${jsonEncode(config['iceServers'])}');
+
+    peerConnection = await createPeerConnection(config);
     debugPrint('[PEER_CONNECTION_CREATED]');
 
     _registerPeerConnectionListeners();
@@ -486,6 +514,9 @@ class Signaling {
         _localRelayCandidateCount++;
         debugPrint('[TURN_RELAY_GENERATED]\ncandidate=$candStr');
       }
+
+      debugPrint(
+          '[ICE_CANDIDATE_COUNT] host=$_localHostCandidateCount srflx=$_localSrflxCandidateCount relay=$_localRelayCandidateCount');
       debugPrint('[CANDIDATE_DB_INSERT]\ntype=$candType\ncandidate=$candStr');
       try {
         await Supabase.instance.client.from('caller_candidates').insert({
@@ -500,6 +531,7 @@ class Signaling {
       }
     };
 
+    debugPrint('[ICE_GATHERING_START_CALLER]');
     final offer = await peerConnection!.createOffer({
       'offerToReceiveAudio': true,
       'offerToReceiveVideo': isVideo,
@@ -677,8 +709,12 @@ class Signaling {
       peerConnection = null;
     }
 
-    debugPrint('[PEER_CONFIG] ${jsonEncode(getConfiguration())}');
-    peerConnection = await createPeerConnection(getConfiguration());
+    final config = getConfiguration();
+    debugPrint('[PEER_CONFIG] ${jsonEncode(config)}');
+    debugPrint('[ICE_TRANSPORT_POLICY] ${config['iceTransportPolicy']}');
+    debugPrint('[ICE_SERVERS] ${jsonEncode(config['iceServers'])}');
+
+    peerConnection = await createPeerConnection(config);
     debugPrint('[PEER_CONNECTION_CREATED]');
 
     _registerPeerConnectionListeners();
@@ -722,6 +758,9 @@ class Signaling {
         _localRelayCandidateCount++;
         debugPrint('[TURN_RELAY_GENERATED]\ncandidate=$candStr');
       }
+
+      debugPrint(
+          '[ICE_CANDIDATE_COUNT] host=$_localHostCandidateCount srflx=$_localSrflxCandidateCount relay=$_localRelayCandidateCount');
       debugPrint('[CANDIDATE_DB_INSERT]\ntype=$candType\ncandidate=$candStr');
       try {
         await Supabase.instance.client.from('callee_candidates').insert({
@@ -744,6 +783,7 @@ class Signaling {
     _remoteDescriptionSet = true;
     await _flushPendingCandidates();
 
+    debugPrint('[ICE_GATHERING_START_CALLEE]');
     final answer = await peerConnection!.createAnswer({
       'offerToReceiveAudio': true,
       'offerToReceiveVideo': isRoomVideo,
@@ -936,6 +976,7 @@ class Signaling {
       debugPrint('[ICE_GATHERING_STATE] $state');
       debugPrint('[STATE] IceGatheringState: $state');
       if (state == RTCIceGatheringState.RTCIceGatheringStateComplete) {
+        _printFinalIceDiagnosticSummary();
         debugPrint(
             '[CANDIDATE_SUMMARY]\nrole=${isCaller ? "caller" : "callee"}\nhost=$_localHostCandidateCount\nsrflx=$_localSrflxCandidateCount\nrelay=$_localRelayCandidateCount');
         if (_localRelayCandidateCount == 0) {
