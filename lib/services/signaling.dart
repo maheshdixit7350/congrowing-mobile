@@ -133,6 +133,11 @@ class Signaling {
       'iceServers': [
         {
           'urls': [
+            'stun:stun.l.google.com:19302',
+          ],
+        },
+        {
+          'urls': [
             'turn:global.relay.metered.ca:3478',
             'turn:global.relay.metered.ca:3478?transport=tcp',
             'turn:global.relay.metered.ca:80',
@@ -975,6 +980,9 @@ class Signaling {
     peerConnection?.onIceGatheringState = (RTCIceGatheringState state) {
       debugPrint('[ICE_GATHERING_STATE] $state');
       debugPrint('[STATE] IceGatheringState: $state');
+      if (state == RTCIceGatheringState.RTCIceGatheringStateGathering) {
+        debugPrint('[ICE_GATHERING_ACTIVE]');
+      }
       if (state == RTCIceGatheringState.RTCIceGatheringStateComplete) {
         _printFinalIceDiagnosticSummary();
         debugPrint(
