@@ -103,7 +103,7 @@ class Signaling {
 
       for (final track in stream.getAudioTracks()) {
         track.enabled = true;
-        debugPrint('[MEDIA] stream=${stream.id} localStreamHash=${stream.hashCode} track=${track.id} label=${track.label} enabled=${track.enabled} readyState=${track.readyState}');
+        debugPrint('[MEDIA] stream=${stream.id} localStreamHash=${stream.hashCode} track=${track.id} label=${track.label} enabled=${track.enabled} muted=${track.muted}');
       }
 
       if (!kIsWeb) {
@@ -127,7 +127,7 @@ class Signaling {
         });
         for (final track in stream.getAudioTracks()) {
           track.enabled = true;
-          debugPrint('[MEDIA_FALLBACK] stream=${stream.id} track=${track.id} enabled=${track.enabled} readyState=${track.readyState}');
+          debugPrint('[MEDIA_FALLBACK] stream=${stream.id} track=${track.id} enabled=${track.enabled} muted=${track.muted}');
         }
         localVideo.srcObject = stream;
         localStream = stream;
@@ -151,18 +151,18 @@ class Signaling {
 
       for (final track in localStream?.getTracks() ?? []) {
         try {
-          debugPrint('[HANGUP_BEFORE] local track=${track.id} readyState=${track.readyState} enabled=${track.enabled}');
+          debugPrint('[HANGUP_BEFORE] local track=${track.id} muted=${track.muted} enabled=${track.enabled}');
           track.enabled = false;
           track.stop();
-          debugPrint('[HANGUP_AFTER] local track=${track.id} readyState=${track.readyState} enabled=${track.enabled}');
+          debugPrint('[HANGUP_AFTER] local track=${track.id} muted=${track.muted} enabled=${track.enabled}');
         } catch (_) {}
       }
       for (final track in remoteStream?.getTracks() ?? []) {
         try {
-          debugPrint('[HANGUP_BEFORE] remote track=${track.id} readyState=${track.readyState} enabled=${track.enabled}');
+          debugPrint('[HANGUP_BEFORE] remote track=${track.id} muted=${track.muted} enabled=${track.enabled}');
           track.enabled = false;
           track.stop();
-          debugPrint('[HANGUP_AFTER] remote track=${track.id} readyState=${track.readyState} enabled=${track.enabled}');
+          debugPrint('[HANGUP_AFTER] remote track=${track.id} muted=${track.muted} enabled=${track.enabled}');
         } catch (_) {}
       }
 
@@ -334,7 +334,7 @@ class Signaling {
       final senders = await peerConnection?.getSenders() ?? [];
       for (final s in senders) {
         final tr = s.track;
-        debugPrint('[CREATE_ROOM] pc=${peerConnection.hashCode} senders=${senders.length} audioTrack=${tr?.id} readyState=${tr?.readyState} enabled=${tr?.enabled}');
+        debugPrint('[CREATE_ROOM] pc=${peerConnection.hashCode} senders=${senders.length} audioTrack=${tr?.id} muted=${tr?.muted} enabled=${tr?.enabled}');
       }
     } catch (_) {}
 
@@ -481,7 +481,7 @@ class Signaling {
       final receivers = await peerConnection?.getReceivers() ?? [];
       for (final r in receivers) {
         final tr = r.track;
-        debugPrint('[JOIN_ROOM] pc=${peerConnection.hashCode} receivers=${receivers.length} audioTrack=${tr?.id} readyState=${tr?.readyState} enabled=${tr?.enabled}');
+        debugPrint('[JOIN_ROOM] pc=${peerConnection.hashCode} receivers=${receivers.length} audioTrack=${tr?.id} muted=${tr?.muted} enabled=${tr?.enabled}');
       }
     } catch (_) {}
 
@@ -660,7 +660,7 @@ class Signaling {
       }
     };
     peerConnection?.onTrack = (RTCTrackEvent event) async {
-      debugPrint('[REMOTE_TRACK] id=${event.track.id} kind=${event.track.kind} enabled=${event.track.enabled} readyState=${event.track.readyState} stream=${event.streams.isNotEmpty ? event.streams[0].id : "none"}');
+      debugPrint('[REMOTE_TRACK] id=${event.track.id} kind=${event.track.kind} enabled=${event.track.enabled} muted=${event.track.muted} stream=${event.streams.isNotEmpty ? event.streams[0].id : "none"}');
       event.track.enabled = true;
       if (event.streams.isNotEmpty) {
         remoteStream = event.streams[0];

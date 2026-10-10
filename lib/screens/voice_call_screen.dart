@@ -236,7 +236,7 @@ class _VoiceCallScreenState extends State<VoiceCallScreen>
     _micCheckTimer = Timer.periodic(const Duration(seconds: 5), (_) {
       if (mounted) {
         for (final tr in signaling.localStream?.getAudioTracks() ?? []) {
-          debugPrint('[MIC_CHECK] trackId=${tr.id} enabled=${tr.enabled} readyState=${tr.readyState}');
+          debugPrint('[MIC_CHECK] trackId=${tr.id} enabled=${tr.enabled} muted=${tr.muted}');
         }
       }
     });
