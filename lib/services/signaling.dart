@@ -13,10 +13,14 @@ typedef IncomingCallCallback = void Function(
 
 class Signaling {
   static String? activeCallRoomId;
+  static bool forceRelayOnly = false;
+
   RTCPeerConnection? peerConnection;
   MediaStream? localStream;
   MediaStream? remoteStream;
   String? roomId;
+  bool isCaller = false;
+  bool _isRestartingIce = false;
 
   StreamStateCallback? onAddRemoteStream;
 
@@ -24,45 +28,67 @@ class Signaling {
   bool _remoteDescriptionSet = false;
   final List<RTCIceCandidate> _pendingCandidates = [];
 
-  final Map<String, dynamic> configuration = {
-    'iceServers': [
-      {
-        'urls': [
-          'stun:stun.l.google.com:19302',
-          'stun:stun1.l.google.com:19302',
-          'stun:stun2.l.google.com:19302',
-          'stun:stun3.l.google.com:19302',
-          'stun:stun4.l.google.com:19302',
-          'stun:openrelay.metered.ca:80',
-          'stun:openrelay.metered.ca:443',
-        ]
-      },
-      {
-        'urls': [
-          'turn:openrelay.metered.ca:80',
-          'turn:openrelay.metered.ca:443',
-          'turn:openrelay.metered.ca:443?transport=tcp',
-          'turns:openrelay.metered.ca:443?transport=tcp',
-        ],
-        'username': 'openrelay',
-        'credential': 'openrelay',
-      },
-      {
-        'urls': [
-          'turn:global.relay.metered.ca:80',
-          'turn:global.relay.metered.ca:80?transport=tcp',
-          'turn:global.relay.metered.ca:443',
-          'turns:global.relay.metered.ca:443?transport=tcp',
-        ],
-        'username': 'e05c4a4a1347fef5fedaa1c5',
-        'credential': 'fCBVVCuN/6gVZrFj',
-      },
-    ],
-    'iceCandidatePoolSize': 10,
-    'iceTransportPolicy': 'all',
-    'rtcpMuxPolicy': 'require',
-    'sdpSemantics': 'unified-plan',
-  };
+  // Stats timer hardening (Task 1)
+  Timer? _statsTimer;
+  bool _statsLoggingStarted = false;
+
+  // Candidate counters for TURN diagnostics (Task 2)
+  int _localHostCandidateCount = 0;
+  int _localSrflxCandidateCount = 0;
+  int _localRelayCandidateCount = 0;
+
+  // RTP Flow validation metrics (Task 7)
+  int _lastAudioPacketsSent = 0;
+  int _lastAudioPacketsReceived = 0;
+  int _lastVideoPacketsSent = 0;
+  int _lastVideoPacketsReceived = 0;
+  int _noRtpFlowSeconds = 0;
+
+  Map<String, dynamic> getConfiguration() {
+    final policy = forceRelayOnly ? 'relay' : 'all';
+    if (forceRelayOnly) {
+      debugPrint('[RELAY_ONLY_MODE_ENABLED] PeerConnection configured with iceTransportPolicy: relay');
+    }
+    return {
+      'iceServers': [
+        {
+          'urls': [
+            'stun:stun.l.google.com:19302',
+            'stun:stun1.l.google.com:19302',
+            'stun:stun2.l.google.com:19302',
+            'stun:stun3.l.google.com:19302',
+            'stun:stun4.l.google.com:19302',
+            'stun:openrelay.metered.ca:80',
+            'stun:openrelay.metered.ca:443',
+          ]
+        },
+        {
+          'urls': [
+            'turn:openrelay.metered.ca:80',
+            'turn:openrelay.metered.ca:443',
+            'turn:openrelay.metered.ca:443?transport=tcp',
+            'turns:openrelay.metered.ca:443?transport=tcp',
+          ],
+          'username': 'openrelay',
+          'credential': 'openrelay',
+        },
+        {
+          'urls': [
+            'turn:global.relay.metered.ca:80',
+            'turn:global.relay.metered.ca:80?transport=tcp',
+            'turn:global.relay.metered.ca:443',
+            'turns:global.relay.metered.ca:443?transport=tcp',
+          ],
+          'username': 'e05c4a4a1347fef5fedaa1c5',
+          'credential': 'fCBVVCuN/6gVZrFj',
+        },
+      ],
+      'iceCandidatePoolSize': 10,
+      'iceTransportPolicy': policy,
+      'rtcpMuxPolicy': 'require',
+      'sdpSemantics': 'unified-plan',
+    };
+  }
 
   // ── Media ──────────────────────────────────────────────────────────────────
 
@@ -108,15 +134,7 @@ class Signaling {
         debugPrint('[MEDIA] stream=${stream.id} localStreamHash=${stream.hashCode} track=${track.id} label=${track.label} enabled=${track.enabled} muted=${track.muted}');
       }
 
-      if (!kIsWeb) {
-        try {
-          await Helper.setSpeakerphoneOn(true);
-          debugPrint('[AUDIO_ROUTE] Helper.setSpeakerphoneOn(true) executed');
-        } catch (e) {
-          debugPrint('[AUDIO_ROUTE] Helper.setSpeakerphoneOn error: $e');
-        }
-      }
-
+      // Note: Audio routing setSpeakerphoneOn moved to ICE connected event (Task 9)
       localVideo.srcObject = stream;
       localStream = stream;
       debugPrint('[Signaling] Fresh hardware media stream acquired.');
@@ -144,6 +162,8 @@ class Signaling {
 
   Future<void> hangUp(RTCVideoRenderer? localVideo, [RTCVideoRenderer? remoteVideo]) async {
     try {
+      _stopStatsLogging();
+
       for (final timer in _activeTimers) {
         try {
           timer.cancel();
@@ -217,9 +237,48 @@ class Signaling {
       roomId = null;
       Signaling.activeCallRoomId = null;
       _remoteDescriptionSet = false;
+      _isRestartingIce = false;
       _pendingCandidates.clear();
+      _localHostCandidateCount = 0;
+      _localSrflxCandidateCount = 0;
+      _localRelayCandidateCount = 0;
+      _noRtpFlowSeconds = 0;
+      _lastAudioPacketsSent = 0;
+      _lastAudioPacketsReceived = 0;
+      _lastVideoPacketsSent = 0;
+      _lastVideoPacketsReceived = 0;
       debugPrint('[Signaling] PeerConnection and media tracks completely disposed.');
     }
+  }
+
+  // ── Candidate Validation (Task 5) ──────────────────────────────────────────
+
+  RTCIceCandidate? _validateAndCreateCandidate(
+      String? candidateStr, dynamic rawSdpMid, dynamic rawSdpMLineIndex) {
+    if (candidateStr == null || candidateStr.trim().isEmpty) {
+      debugPrint('⚠️ [INVALID_CANDIDATE] Candidate string is null or empty.');
+      return null;
+    }
+
+    String? sdpMid;
+    if (rawSdpMid != null && rawSdpMid.toString().isNotEmpty) {
+      sdpMid = rawSdpMid.toString();
+    }
+
+    int? sdpMLineIndex;
+    if (rawSdpMLineIndex is int) {
+      sdpMLineIndex = rawSdpMLineIndex;
+    } else if (rawSdpMLineIndex != null) {
+      sdpMLineIndex = int.tryParse(rawSdpMLineIndex.toString());
+    }
+
+    if (sdpMid == null && sdpMLineIndex == null) {
+      debugPrint(
+          '⚠️ [INVALID_SDPMID] [INVALID_SDPMLINEINDEX] Candidate missing both sdpMid and sdpMLineIndex for candidate: $candidateStr');
+      return null;
+    }
+
+    return RTCIceCandidate(candidateStr, sdpMid, sdpMLineIndex);
   }
 
   // ── Flush buffered ICE candidates ─────────────────────────────────────────
@@ -230,9 +289,11 @@ class Signaling {
     for (final candidate in List.of(_pendingCandidates)) {
       try {
         await peerConnection?.addCandidate(candidate);
-        debugPrint('📡 [ICE_FLUSHED] addCandidate SUCCESS: sdpMid=${candidate.sdpMid} sdpMLineIndex=${candidate.sdpMLineIndex} cand=${candidate.candidate}');
+        debugPrint(
+            '📡 [ICE_FLUSHED] addCandidate SUCCESS: sdpMid=${candidate.sdpMid} sdpMLineIndex=${candidate.sdpMLineIndex} cand=${candidate.candidate}');
       } catch (e) {
-        debugPrint('⚠️ [ICE_FLUSHED_ERROR] Error adding buffered candidate (${candidate.candidate}): $e');
+        debugPrint(
+            '⚠️ [ICE_FLUSHED_ERROR] Error adding buffered candidate (${candidate.candidate}): $e');
       }
     }
     _pendingCandidates.clear();
@@ -243,12 +304,15 @@ class Signaling {
     if (_remoteDescriptionSet && peerConnection != null) {
       try {
         await peerConnection!.addCandidate(candidate);
-        debugPrint('📡 [ICE_ADDED] addCandidate SUCCESS: sdpMid=${candidate.sdpMid} sdpMLineIndex=${candidate.sdpMLineIndex} cand=${candidate.candidate}');
+        debugPrint(
+            '📡 [ICE_ADDED] addCandidate SUCCESS: sdpMid=${candidate.sdpMid} sdpMLineIndex=${candidate.sdpMLineIndex} cand=${candidate.candidate}');
       } catch (e) {
-        debugPrint('⚠️ [ICE_ADD_ERROR] Error adding candidate (${candidate.candidate}): $e');
+        debugPrint(
+            '⚠️ [ICE_ADD_ERROR] Error adding candidate (${candidate.candidate}): $e');
       }
     } else {
-      debugPrint('📡 [ICE_QUEUED] Queuing candidate (remote description not ready yet): sdpMid=${candidate.sdpMid} cand=${candidate.candidate}');
+      debugPrint(
+          '📡 [ICE_QUEUED] Queuing candidate (remote description not ready yet): sdpMid=${candidate.sdpMid} cand=${candidate.candidate}');
       _pendingCandidates.add(candidate);
     }
   }
@@ -273,8 +337,13 @@ class Signaling {
   Future<String> createRoom(bool isVideo, {String calleeUid = ''}) async {
     if (!supabaseInitialized) return '';
 
+    isCaller = true;
     _remoteDescriptionSet = false;
     _pendingCandidates.clear();
+    _stopStatsLogging();
+    _localHostCandidateCount = 0;
+    _localSrflxCandidateCount = 0;
+    _localRelayCandidateCount = 0;
 
     final uid = SupabaseAuthService.instance.currentUser?.id;
 
@@ -322,10 +391,9 @@ class Signaling {
       peerConnection = null;
     }
 
-    peerConnection = await createPeerConnection(configuration);
+    peerConnection = await createPeerConnection(getConfiguration());
 
     _registerPeerConnectionListeners();
-    _startStatsLogging();
 
     localStream?.getTracks().forEach((track) {
       peerConnection?.addTrack(track, localStream!);
@@ -337,23 +405,28 @@ class Signaling {
       final senders = await peerConnection?.getSenders() ?? [];
       for (final s in senders) {
         final tr = s.track;
-        debugPrint('[CREATE_ROOM] pc=${peerConnection.hashCode} senders=${senders.length} audioTrack=${tr?.id} muted=${tr?.muted} enabled=${tr?.enabled}');
+        debugPrint(
+            '[CREATE_ROOM] pc=${peerConnection.hashCode} senders=${senders.length} audioTrack=${tr?.id} muted=${tr?.muted} enabled=${tr?.enabled}');
       }
     } catch (_) {}
 
     // ICE Candidate handler for Caller
     peerConnection?.onIceCandidate = (RTCIceCandidate? candidate) async {
-      if (candidate == null || candidate.candidate == null) return;
-      final candStr = candidate.candidate ?? '';
+      if (candidate == null || candidate.candidate == null || candidate.candidate!.isEmpty) return;
+      final candStr = candidate.candidate!;
       String candType = 'unknown';
       if (candStr.contains('typ host')) {
         candType = 'host';
+        _localHostCandidateCount++;
       } else if (candStr.contains('typ srflx')) {
         candType = 'srflx';
+        _localSrflxCandidateCount++;
       } else if (candStr.contains('typ relay')) {
         candType = 'relay';
+        _localRelayCandidateCount++;
       }
-      debugPrint('[ICE_GENERATED_LOCAL] role=caller type=$candType sdpMid=${candidate.sdpMid} sdpMLineIndex=${candidate.sdpMLineIndex} candidate=$candStr');
+      debugPrint(
+          '[ICE_GENERATED_LOCAL] role=caller type=$candType sdpMid=${candidate.sdpMid} sdpMLineIndex=${candidate.sdpMLineIndex} candidate=$candStr');
       try {
         await Supabase.instance.client.from('caller_candidates').insert({
           'room_id': roomId,
@@ -394,7 +467,8 @@ class Signaling {
       try {
         final currentSigState = await peerConnection?.getSignalingState();
         if (_remoteDescriptionSet || currentSigState == RTCSignalingState.RTCSignalingStateStable) {
-          debugPrint('[ANSWER_ALREADY_APPLIED] Signaling state is already stable ($currentSigState). Skipping duplicate answer.');
+          debugPrint(
+              '[ANSWER_ALREADY_APPLIED] Signaling state is already stable ($currentSigState). Skipping duplicate answer.');
           _remoteDescriptionSet = true;
           answerTimer?.cancel();
           return;
@@ -411,7 +485,8 @@ class Signaling {
           final answer = RTCSessionDescription(answerMap['sdp'], answerMap['type']);
           final answerTimestamp = res['updated_at']?.toString() ?? '';
 
-          debugPrint('[ANSWER_RECEIVED] roomId=$roomId answerTimestamp=$answerTimestamp sdpLength=${answer.sdp?.length}');
+          debugPrint(
+              '[ANSWER_RECEIVED] roomId=$roomId answerTimestamp=$answerTimestamp sdpLength=${answer.sdp?.length}');
 
           // Lock immediately to prevent concurrent timer execution
           settingAnswer = true;
@@ -420,11 +495,13 @@ class Signaling {
           debugPrint('[ANSWER_POLL_STOPPED] Answer polling timer stopped.');
 
           final sigBefore = await peerConnection?.getSignalingState();
-          debugPrint('[SIGNALING_BEFORE_ANSWER] currentState=$sigBefore sdpLength=${answer.sdp?.length} type=${answer.type}');
+          debugPrint(
+              '[SIGNALING_BEFORE_ANSWER] currentState=$sigBefore sdpLength=${answer.sdp?.length} type=${answer.type}');
 
           if (sigBefore == RTCSignalingState.RTCSignalingStateHaveLocalOffer) {
             await peerConnection?.setRemoteDescription(answer);
-            debugPrint('[REMOTE_DESCRIPTION] role=caller setRemoteDescription SUCCESS! SignalingState is now: ${await peerConnection?.getSignalingState()}');
+            debugPrint(
+                '[REMOTE_DESCRIPTION] role=caller setRemoteDescription SUCCESS! SignalingState is now: ${await peerConnection?.getSignalingState()}');
             debugPrint('[ANSWER_APPLIED] Answer applied successfully!');
             await _flushPendingCandidates();
           } else {
@@ -439,7 +516,7 @@ class Signaling {
     });
     _activeTimers.add(answerTimer);
 
-    // Fast 300ms REST polling for Callee ICE candidates
+    // Fast 300ms REST polling for Callee ICE candidates (Task 5 Validation Applied)
     final addedCalleeCandidates = <String>{};
     Timer? calleeCandidateTimer;
     calleeCandidateTimer = Timer.periodic(const Duration(milliseconds: 300), (_) async {
@@ -452,23 +529,23 @@ class Signaling {
             .from('callee_candidates')
             .select()
             .eq('room_id', roomId!);
-        
+
         debugPrint('[CANDIDATE_COUNTS] callee_candidates count=${list.length} for roomId=$roomId');
 
         for (final candMap in list) {
           final candidateStr = candMap['candidate'] as String?;
           if (candidateStr != null && !addedCalleeCandidates.contains(candidateStr)) {
             addedCalleeCandidates.add(candidateStr);
-            final sdpMid = (candMap['sdpmid'] ?? candMap['sdpMid'] ?? '0').toString();
-            final rawIndex = candMap['sdpmlineindex'] ?? candMap['sdpMLineIndex'];
-            int sdpMLineIndex = 0;
-            if (rawIndex is int) {
-              sdpMLineIndex = rawIndex;
-            } else if (rawIndex != null) {
-              sdpMLineIndex = int.tryParse(rawIndex.toString()) ?? 0;
+            final candObj = _validateAndCreateCandidate(
+              candidateStr,
+              candMap['sdpmid'] ?? candMap['sdpMid'],
+              candMap['sdpmlineindex'] ?? candMap['sdpMLineIndex'],
+            );
+            if (candObj != null) {
+              debugPrint(
+                  '[ICE_RETRIEVED_DB] callee candidate from DB: sdpMid=${candObj.sdpMid} sdpMLineIndex=${candObj.sdpMLineIndex} candidate=$candidateStr');
+              await _addIceCandidateSafe(candObj);
             }
-            debugPrint('[ICE_RETRIEVED_DB] callee candidate from DB: sdpMid=$sdpMid sdpMLineIndex=$sdpMLineIndex candidate=$candidateStr');
-            await _addIceCandidateSafe(RTCIceCandidate(candidateStr, sdpMid, sdpMLineIndex));
           }
         }
       } catch (e) {
@@ -484,11 +561,16 @@ class Signaling {
 
   Future<void> joinRoom(String joinRoomId) async {
     if (!supabaseInitialized) return;
+    isCaller = false;
     roomId = joinRoomId;
     Signaling.activeCallRoomId = joinRoomId;
 
     _remoteDescriptionSet = false;
     _pendingCandidates.clear();
+    _stopStatsLogging();
+    _localHostCandidateCount = 0;
+    _localSrflxCandidateCount = 0;
+    _localRelayCandidateCount = 0;
 
     // Poll for offer in rooms table up to 10s to eliminate race condition
     Map<String, dynamic>? roomData;
@@ -520,9 +602,8 @@ class Signaling {
       peerConnection = null;
     }
 
-    peerConnection = await createPeerConnection(configuration);
+    peerConnection = await createPeerConnection(getConfiguration());
     _registerPeerConnectionListeners();
-    _startStatsLogging();
 
     localStream?.getTracks().forEach((track) {
       peerConnection?.addTrack(track, localStream!);
@@ -534,22 +615,27 @@ class Signaling {
       final receivers = await peerConnection?.getReceivers() ?? [];
       for (final r in receivers) {
         final tr = r.track;
-        debugPrint('[JOIN_ROOM] pc=${peerConnection.hashCode} receivers=${receivers.length} audioTrack=${tr?.id} muted=${tr?.muted} enabled=${tr?.enabled}');
+        debugPrint(
+            '[JOIN_ROOM] pc=${peerConnection.hashCode} receivers=${receivers.length} audioTrack=${tr?.id} muted=${tr?.muted} enabled=${tr?.enabled}');
       }
     } catch (_) {}
 
     peerConnection?.onIceCandidate = (RTCIceCandidate? candidate) async {
-      if (candidate == null || candidate.candidate == null) return;
-      final candStr = candidate.candidate ?? '';
+      if (candidate == null || candidate.candidate == null || candidate.candidate!.isEmpty) return;
+      final candStr = candidate.candidate!;
       String candType = 'unknown';
       if (candStr.contains('typ host')) {
         candType = 'host';
+        _localHostCandidateCount++;
       } else if (candStr.contains('typ srflx')) {
         candType = 'srflx';
+        _localSrflxCandidateCount++;
       } else if (candStr.contains('typ relay')) {
         candType = 'relay';
+        _localRelayCandidateCount++;
       }
-      debugPrint('[ICE_GENERATED_LOCAL] role=callee type=$candType sdpMid=${candidate.sdpMid} sdpMLineIndex=${candidate.sdpMLineIndex} candidate=$candStr');
+      debugPrint(
+          '[ICE_GENERATED_LOCAL] role=callee type=$candType sdpMid=${candidate.sdpMid} sdpMLineIndex=${candidate.sdpMLineIndex} candidate=$candStr');
       try {
         await Supabase.instance.client.from('callee_candidates').insert({
           'room_id': joinRoomId,
@@ -565,7 +651,8 @@ class Signaling {
 
     final offerMap = Map<String, dynamic>.from(roomData['offer']);
     final remoteOffer = RTCSessionDescription(offerMap['sdp'], offerMap['type']);
-    debugPrint('[REMOTE_DESCRIPTION] role=callee setting remote offer sdpLength=${remoteOffer.sdp?.length} type=${remoteOffer.type}');
+    debugPrint(
+        '[REMOTE_DESCRIPTION] role=callee setting remote offer sdpLength=${remoteOffer.sdp?.length} type=${remoteOffer.type}');
     await peerConnection?.setRemoteDescription(remoteOffer);
     _remoteDescriptionSet = true;
     await _flushPendingCandidates();
@@ -576,7 +663,8 @@ class Signaling {
     });
     await peerConnection!.setLocalDescription(answer);
 
-    debugPrint('[LOCAL_DESCRIPTION] role=callee setLocalDescription answer sdpLength=${answer.sdp?.length} type=${answer.type}');
+    debugPrint(
+        '[LOCAL_DESCRIPTION] role=callee setLocalDescription answer sdpLength=${answer.sdp?.length} type=${answer.type}');
 
     final answerTimestamp = DateTime.now().toIso8601String();
     await Supabase.instance.client.from('rooms').update({
@@ -586,7 +674,7 @@ class Signaling {
     }).eq('id', joinRoomId);
     debugPrint('[ROOM_UPDATED] roomId=$joinRoomId answerTimestamp=$answerTimestamp status=connected');
 
-    // Fast 300ms REST polling for Caller ICE candidates
+    // Fast 300ms REST polling for Caller ICE candidates (Task 5 Validation Applied)
     final addedCallerCandidates = <String>{};
     Timer? callerCandidateTimer;
     callerCandidateTimer = Timer.periodic(const Duration(milliseconds: 300), (_) async {
@@ -606,16 +694,16 @@ class Signaling {
           final candidateStr = candMap['candidate'] as String?;
           if (candidateStr != null && !addedCallerCandidates.contains(candidateStr)) {
             addedCallerCandidates.add(candidateStr);
-            final sdpMid = (candMap['sdpmid'] ?? candMap['sdpMid'] ?? '0').toString();
-            final rawIndex = candMap['sdpmlineindex'] ?? candMap['sdpMLineIndex'];
-            int sdpMLineIndex = 0;
-            if (rawIndex is int) {
-              sdpMLineIndex = rawIndex;
-            } else if (rawIndex != null) {
-              sdpMLineIndex = int.tryParse(rawIndex.toString()) ?? 0;
+            final candObj = _validateAndCreateCandidate(
+              candidateStr,
+              candMap['sdpmid'] ?? candMap['sdpMid'],
+              candMap['sdpmlineindex'] ?? candMap['sdpMLineIndex'],
+            );
+            if (candObj != null) {
+              debugPrint(
+                  '[ICE_RETRIEVED_DB] caller candidate from DB: sdpMid=${candObj.sdpMid} sdpMLineIndex=${candObj.sdpMLineIndex} candidate=$candidateStr');
+              await _addIceCandidateSafe(candObj);
             }
-            debugPrint('[ICE_RETRIEVED_DB] caller candidate from DB: sdpMid=$sdpMid sdpMLineIndex=$sdpMLineIndex candidate=$candidateStr');
-            await _addIceCandidateSafe(RTCIceCandidate(candidateStr, sdpMid, sdpMLineIndex));
           }
         }
       } catch (e) {
@@ -669,7 +757,7 @@ class Signaling {
     });
 
     controller.onCancel = () {
-      timer?.cancel();
+      timer.cancel();
       controller.close();
     };
 
@@ -697,11 +785,44 @@ class Signaling {
     });
 
     controller.onCancel = () {
-      timer?.cancel();
+      timer.cancel();
       controller.close();
     };
 
     return controller.stream.listen((_) {});
+  }
+
+  // ── Proper ICE Restart with Renegotiation (Task 4) ─────────────────────────
+
+  Future<void> _restartIceWithRenegotiation() async {
+    if (_isRestartingIce || peerConnection == null || roomId == null) return;
+    _isRestartingIce = true;
+    debugPrint('[ICE_RESTART_STARTED] Initiating full ICE restart for roomId=$roomId...');
+
+    try {
+      if (isCaller) {
+        final offer = await peerConnection!.createOffer({
+          'iceRestart': true,
+          'offerToReceiveAudio': true,
+          'offerToReceiveVideo': true,
+        });
+        debugPrint('[ICE_RESTART_OFFER_CREATED] sdpLength=${offer.sdp?.length}');
+        await peerConnection!.setLocalDescription(offer);
+
+        await Supabase.instance.client.from('rooms').update({
+          'offer': offer.toMap(),
+          'updated_at': DateTime.now().toIso8601String(),
+        }).eq('id', roomId!);
+        debugPrint('[ICE_RESTART_OFFER_SENT] Restart offer updated in rooms table.');
+      } else {
+        debugPrint('[ICE_RESTART_CALLEE] Callee triggering peerConnection.restartIce()...');
+        await peerConnection?.restartIce();
+      }
+    } catch (e) {
+      debugPrint('⚠️ [ICE_RESTART_ERROR] Error during ICE restart: $e');
+    } finally {
+      _isRestartingIce = false;
+    }
   }
 
   // ── Peer Connection Listeners ─────────────────────────────────────────────
@@ -709,22 +830,60 @@ class Signaling {
   void _registerPeerConnectionListeners() {
     peerConnection?.onIceGatheringState = (RTCIceGatheringState state) {
       debugPrint('[STATE] IceGatheringState: $state');
+      if (state == RTCIceGatheringState.RTCIceGatheringStateComplete) {
+        debugPrint(
+            '[CANDIDATE_SUMMARY] host=$_localHostCandidateCount srflx=$_localSrflxCandidateCount relay=$_localRelayCandidateCount');
+        if (_localRelayCandidateCount == 0) {
+          debugPrint(
+              '⚠️ [NO_RELAY_CANDIDATES_GENERATED] Zero TURN relay candidates generated during gathering!');
+        }
+      }
     };
-    peerConnection?.onConnectionState = (RTCPeerConnectionState state) {
+
+    peerConnection?.onConnectionState = (RTCPeerConnectionState state) async {
       debugPrint('[STATE] ConnectionState: $state');
       if (state == RTCPeerConnectionState.RTCPeerConnectionStateConnected) {
         _startStatsLogging();
+        try {
+          final senders = await peerConnection?.getSenders() ?? [];
+          for (final s in senders) {
+            final tr = s.track;
+            if (tr != null) {
+              debugPrint('[SENDER_TRACK] kind=${tr.kind} id=${tr.id} enabled=${tr.enabled} muted=${tr.muted}');
+            }
+          }
+          final receivers = await peerConnection?.getReceivers() ?? [];
+          for (final r in receivers) {
+            final tr = r.track;
+            if (tr != null) {
+              debugPrint('[RECEIVER_TRACK] kind=${tr.kind} id=${tr.id} enabled=${tr.enabled} muted=${tr.muted}');
+            }
+          }
+        } catch (_) {}
       }
     };
+
     peerConnection?.onSignalingState = (RTCSignalingState state) {
       debugPrint('[STATE] SignalingState: $state');
     };
+
     peerConnection?.onIceConnectionState = (RTCIceConnectionState state) async {
       debugPrint('[STATE] IceConnectionState: $state');
       if (state == RTCIceConnectionState.RTCIceConnectionStateConnected ||
           state == RTCIceConnectionState.RTCIceConnectionStateCompleted) {
         _startStatsLogging();
         debugPrint('✅ [ICE] Media transport CONNECTED / COMPLETED!');
+
+        // Audio Routing Fix (Task 9): Enable speakerphone AFTER ICE connects
+        try {
+          if (!kIsWeb) {
+            await Helper.setSpeakerphoneOn(true);
+            debugPrint('[AUDIO_ROUTE_CONNECTED] Helper.setSpeakerphoneOn(true) executed after ICE connected.');
+          }
+        } catch (e) {
+          debugPrint('[AUDIO_ROUTE_ERROR] Helper.setSpeakerphoneOn error: $e');
+        }
+
         try {
           final stats = await peerConnection?.getStats();
           for (final report in stats ?? []) {
@@ -737,14 +896,14 @@ class Signaling {
         } catch (_) {}
       }
       if (state == RTCIceConnectionState.RTCIceConnectionStateFailed) {
-        debugPrint('⚠️ [ICE] Connection failed! Triggering restartIce()...');
-        try {
-          peerConnection?.restartIce();
-        } catch (_) {}
+        debugPrint('⚠️ [ICE] Connection failed! Initiating full ICE restart with renegotiation...');
+        await _restartIceWithRenegotiation();
       }
     };
+
     peerConnection?.onTrack = (RTCTrackEvent event) async {
-      debugPrint('[REMOTE_TRACK] id=${event.track.id} kind=${event.track.kind} enabled=${event.track.enabled} muted=${event.track.muted} stream=${event.streams.isNotEmpty ? event.streams[0].id : "none"}');
+      debugPrint(
+          '[REMOTE_TRACK] id=${event.track.id} kind=${event.track.kind} enabled=${event.track.enabled} muted=${event.track.muted} stream=${event.streams.isNotEmpty ? event.streams[0].id : "none"}');
       event.track.enabled = true;
       if (event.streams.isNotEmpty) {
         remoteStream = event.streams[0];
@@ -758,18 +917,11 @@ class Signaling {
           Helper.setVolume(1.0, track);
         } catch (_) {}
       }
-      try {
-        if (!kIsWeb) {
-          for (final track in localStream?.getAudioTracks() ?? []) {
-            track.enabled = true;
-          }
-          Helper.setSpeakerphoneOn(true);
-        }
-      } catch (_) {}
       if (remoteStream != null) {
         onAddRemoteStream?.call(remoteStream!);
       }
     };
+
     peerConnection?.onAddStream = (MediaStream stream) {
       debugPrint('[REMOTE_STREAM_ADDED] streamId=${stream.id} tracks=${stream.getAudioTracks().length}');
       remoteStream = stream;
@@ -779,35 +931,51 @@ class Signaling {
           Helper.setVolume(1.0, track);
         } catch (_) {}
       }
-      try {
-        if (!kIsWeb) {
-          for (final track in localStream?.getAudioTracks() ?? []) {
-            track.enabled = true;
-          }
-          Helper.setSpeakerphoneOn(true);
-        }
-      } catch (_) {}
       onAddRemoteStream?.call(remoteStream!);
     };
   }
 
+  // ── Stats Logging & Hardening (Task 1, 6, 7, 8) ────────────────────────────
+
   void _startStatsLogging() {
-    Timer? statsTimer;
-    statsTimer = Timer.periodic(const Duration(seconds: 3), (_) async {
+    if (_statsLoggingStarted || _statsTimer != null) {
+      debugPrint('[STATS_TIMER_ALREADY_RUNNING] Stats timer is already running.');
+      return;
+    }
+    _statsLoggingStarted = true;
+    debugPrint('[STATS_TIMER_STARTED] Starting WebRTC stats logging timer.');
+
+    _statsTimer = Timer.periodic(const Duration(seconds: 3), (_) async {
       if (peerConnection == null) {
-        statsTimer?.cancel();
+        _stopStatsLogging();
         return;
       }
       try {
+        // Media Flow Validation (Task 6)
+        for (final track in localStream?.getAudioTracks() ?? []) {
+          debugPrint(
+              '[MIC_TRACK] enabled=${track.enabled} muted=${track.muted} label=${track.label} id=${track.id}');
+        }
+        for (final track in remoteStream?.getAudioTracks() ?? []) {
+          debugPrint(
+              '[REMOTE_AUDIO_TRACK] enabled=${track.enabled} muted=${track.muted} label=${track.label} id=${track.id}');
+        }
+        for (final track in remoteStream?.getVideoTracks() ?? []) {
+          debugPrint(
+              '[REMOTE_VIDEO_TRACK] enabled=${track.enabled} muted=${track.muted} label=${track.label} id=${track.id}');
+        }
+
         final stats = await peerConnection?.getStats();
         if (stats != null) {
-          int packetsSent = 0;
-          int packetsReceived = 0;
+          int audioPacketsSent = 0;
+          int audioPacketsReceived = 0;
+          int videoPacketsSent = 0;
+          int videoPacketsReceived = 0;
           int bytesSent = 0;
           int bytesReceived = 0;
           num currentRTT = 0;
 
-          final candidateMap = <String, Map<String, dynamic>>{};
+          final candidateMap = <String, Map<dynamic, dynamic>>{};
           for (final report in stats) {
             if (report.type == 'local-candidate' || report.type == 'remote-candidate') {
               candidateMap[report.id] = report.values;
@@ -816,17 +984,29 @@ class Signaling {
 
           for (final report in stats) {
             final values = report.values;
-            if (report.type == 'outbound-rtp' && (values['kind'] == 'audio' || values['mediaType'] == 'audio')) {
-              packetsSent = values['packetsSent'] ?? 0;
-              bytesSent = values['bytesSent'] ?? 0;
+            if (report.type == 'outbound-rtp') {
+              if (values['kind'] == 'audio' || values['mediaType'] == 'audio') {
+                audioPacketsSent = values['packetsSent'] ?? 0;
+                bytesSent += (values['bytesSent'] as int? ?? 0);
+              } else if (values['kind'] == 'video' || values['mediaType'] == 'video') {
+                videoPacketsSent = values['packetsSent'] ?? 0;
+                bytesSent += (values['bytesSent'] as int? ?? 0);
+              }
             }
-            if (report.type == 'inbound-rtp' && (values['kind'] == 'audio' || values['mediaType'] == 'audio')) {
-              packetsReceived = values['packetsReceived'] ?? 0;
-              bytesReceived = values['bytesReceived'] ?? 0;
+            if (report.type == 'inbound-rtp') {
+              if (values['kind'] == 'audio' || values['mediaType'] == 'audio') {
+                audioPacketsReceived = values['packetsReceived'] ?? 0;
+                bytesReceived += (values['bytesReceived'] as int? ?? 0);
+              } else if (values['kind'] == 'video' || values['mediaType'] == 'video') {
+                videoPacketsReceived = values['packetsReceived'] ?? 0;
+                bytesReceived += (values['bytesReceived'] as int? ?? 0);
+              }
             }
+
             if (report.type == 'candidate-pair') {
               final state = values['state']?.toString() ?? 'unknown';
               final isNominated = values['nominated'] == true;
+              final isWritable = values['writable'] == true;
               final localId = values['localCandidateId']?.toString() ?? '';
               final remoteId = values['remoteCandidateId']?.toString() ?? '';
               final localCand = candidateMap[localId];
@@ -835,22 +1015,63 @@ class Signaling {
               final remoteType = remoteCand?['candidateType'] ?? remoteCand?['candidate_type'] ?? 'unknown';
               final pairRtt = values['currentRoundTripTime'] ?? 0;
 
-              debugPrint('[ICE_PAIR_STATE] pairId=${report.id} state=$state nominated=$isNominated localType=$localType remoteType=$remoteType rtt=$pairRtt');
-
               if (isNominated || state == 'succeeded') {
-                debugPrint('[ICE_NOMINATED_PAIR] pairId=${report.id} localType=$localType remoteType=$remoteType rtt=$pairRtt');
-                debugPrint('[ICE_SELECTED_PAIR] localCandidateType=$localType remoteCandidateType=$remoteType candidatePairState=$state rtt=$pairRtt');
+                debugPrint(
+                    '[ICE_PAIR_STATE] pairId=${report.id} state=$state nominated=$isNominated writable=$isWritable localCandidateType=$localType remoteCandidateType=$remoteType rtt=$pairRtt');
+              }
+
+              if (isNominated && (state == 'succeeded' || isWritable)) {
+                debugPrint(
+                    '[ICE_SELECTED_PAIR] localCandidateType=$localType remoteCandidateType=$remoteType candidatePairState=$state rtt=$pairRtt');
                 currentRTT = pairRtt;
               }
             }
           }
-          debugPrint('[WEBRTC_STATS] bytesSent=$bytesSent bytesReceived=$bytesReceived packetsSent=$packetsSent packetsReceived=$packetsReceived currentRoundTripTime=$currentRTT');
+
+          // RTP Flow Validation (Task 7)
+          final totalPackets = audioPacketsSent + audioPacketsReceived + videoPacketsSent + videoPacketsReceived;
+          final prevTotalPackets = _lastAudioPacketsSent + _lastAudioPacketsReceived + _lastVideoPacketsSent + _lastVideoPacketsReceived;
+
+          if (totalPackets > prevTotalPackets) {
+            debugPrint(
+                '[RTP_FLOW_DETECTED] audioPacketsSent=$audioPacketsSent audioPacketsReceived=$audioPacketsReceived videoPacketsSent=$videoPacketsSent videoPacketsReceived=$videoPacketsReceived bytesSent=$bytesSent bytesReceived=$bytesReceived');
+            _noRtpFlowSeconds = 0;
+          } else {
+            final hasRemoteTracks = (remoteStream?.getTracks().isNotEmpty ?? false);
+            if (hasRemoteTracks) {
+              _noRtpFlowSeconds += 3;
+              if (_noRtpFlowSeconds >= 10) {
+                debugPrint(
+                    '[NO_RTP_FLOW] Warning: Remote tracks present but RTP packets remained zero for ${_noRtpFlowSeconds}s! bytesReceived=$bytesReceived');
+              }
+            }
+          }
+
+          _lastAudioPacketsSent = audioPacketsSent;
+          _lastAudioPacketsReceived = audioPacketsReceived;
+          _lastVideoPacketsSent = videoPacketsSent;
+          _lastVideoPacketsReceived = videoPacketsReceived;
+
+          debugPrint(
+              '[WEBRTC_STATS] bytesSent=$bytesSent bytesReceived=$bytesReceived audioPacketsSent=$audioPacketsSent audioPacketsReceived=$audioPacketsReceived videoPacketsSent=$videoPacketsSent videoPacketsReceived=$videoPacketsReceived currentRoundTripTime=$currentRTT');
         }
       } catch (e) {
         debugPrint('[WEBRTC_STATS] Error fetching stats: $e');
       }
     });
-    _activeTimers.add(statsTimer);
+    _activeTimers.add(_statsTimer!);
+  }
+
+  void _stopStatsLogging() {
+    if (_statsTimer != null) {
+      try {
+        _statsTimer!.cancel();
+        _activeTimers.remove(_statsTimer);
+      } catch (_) {}
+      _statsTimer = null;
+      debugPrint('[STATS_TIMER_STOPPED] Stats logging timer stopped.');
+    }
+    _statsLoggingStarted = false;
   }
 
   // Keep backward compat
