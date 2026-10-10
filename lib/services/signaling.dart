@@ -437,6 +437,7 @@ class Signaling {
       } else if (candStr.contains('typ relay')) {
         candType = 'relay';
         _localRelayCandidateCount++;
+        debugPrint('✅ [TURN_CONNECTIVITY_TEST] Relay candidate generated successfully! role=caller type=relay sdpMid=${candidate.sdpMid} sdpMLineIndex=${candidate.sdpMLineIndex}');
       }
       debugPrint(
           '[ICE_GENERATED_LOCAL] role=caller type=$candType sdpMid=${candidate.sdpMid} sdpMLineIndex=${candidate.sdpMLineIndex} candidate=$candStr');
@@ -646,6 +647,7 @@ class Signaling {
       } else if (candStr.contains('typ relay')) {
         candType = 'relay';
         _localRelayCandidateCount++;
+        debugPrint('✅ [TURN_CONNECTIVITY_TEST] Relay candidate generated successfully! role=callee type=relay sdpMid=${candidate.sdpMid} sdpMLineIndex=${candidate.sdpMLineIndex}');
       }
       debugPrint(
           '[ICE_GENERATED_LOCAL] role=callee type=$candType sdpMid=${candidate.sdpMid} sdpMLineIndex=${candidate.sdpMLineIndex} candidate=$candStr');
@@ -1048,6 +1050,9 @@ class Signaling {
           if (totalPackets > prevTotalPackets) {
             debugPrint(
                 '[RTP_FLOW_DETECTED] audioPacketsSent=$audioPacketsSent audioPacketsReceived=$audioPacketsReceived videoPacketsSent=$videoPacketsSent videoPacketsReceived=$videoPacketsReceived bytesSent=$bytesSent bytesReceived=$bytesReceived');
+            if (audioPacketsReceived > 0 || videoPacketsReceived > 0) {
+              debugPrint('✅ [RTP_STREAMING_SUCCESS] Remote media packets actively flowing! audioPacketsReceived=$audioPacketsReceived videoPacketsReceived=$videoPacketsReceived');
+            }
             _noRtpFlowSeconds = 0;
           } else {
             final hasRemoteTracks = (remoteStream?.getTracks().isNotEmpty ?? false);
